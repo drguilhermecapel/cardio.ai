@@ -135,4 +135,4 @@ class CardioAICompleteFixRunner:
             "python-dotenv>=1.0.0",
             "alembic>=1.11.0",
             "pytest>=7.4.0",
-            "pytest-asyncio>=0.21.0"
+            "pytest-asyncio>=0.21.0

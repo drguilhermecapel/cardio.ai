@@ -1,200 +1,214 @@
-# CardioAI Pro - Interpretador de ECG com Inteligência Artificial
+# Plataforma de Treinamento de IA - CardioAI Pro
 
-Sistema avançado para análise e interpretação automática de eletrocardiogramas usando inteligência artificial.
+## Visão Geral
+
+Esta plataforma fornece um sistema completo de treinamento de modelos de deep learning para análise de ECG, integrado ao sistema CardioAI Pro existente.
 
 ## Características Principais
 
-- **Análise Automática de ECG**: Processamento e interpretação de sinais de ECG
-- **Detecção de Arritmias**: Identificação automática de irregularidades no ritmo cardíaco
-- **Interpretação com IA**: Análise inteligente com relatórios detalhados
-- **API REST Completa**: Interface de programação para integração
-- **Processamento de Sinais**: Filtros avançados e pré-processamento
-- **Detecção de Anormalidades**: Identificação de padrões anômalos
-
-## Tecnologias Utilizadas
-
-- **Backend**: FastAPI, Python 3.11+
-- **Machine Learning**: PyTorch, NumPy, SciPy
-- **Processamento de Sinais**: SciPy, filtros digitais
-- **API**: FastAPI, Pydantic, Uvicorn
-- **Banco de Dados**: SQLAlchemy, PostgreSQL
-
-## Instalação
-
-### Pré-requisitos
-
-- Python 3.11 ou superior
-- pip (gerenciador de pacotes Python)
-
-### Passos de Instalação
-
-1. Clone o repositório:
-```bash
-git clone https://github.com/drguilhermecapel/cardio.ai.git
-cd cardio.ai
-```
-
-2. Instale as dependências:
-```bash
-pip install -r requirements.txt
-```
-
-3. Execute a aplicação:
-```bash
-cd backend
-python -m app.main
-```
-
-A aplicação estará disponível em `http://localhost:8000`
-
-## Uso da API
-
-### Endpoints Principais
-
-#### 1. Análise de ECG Simulado
-```http
-POST /ecg/analyze
-Content-Type: application/json
-
-{
-    "patient_id": "12345",
-    "patient_name": "João Silva",
-    "patient_age": 45,
-    "sampling_rate": 500
-}
-```
-
-#### 2. Upload e Análise de Arquivo
-```http
-POST /ecg/analyze-file
-Content-Type: multipart/form-data
-
-file: [arquivo ECG em formato JSON ou CSV]
-patient_id: "12345"
-patient_name: "João Silva"
-patient_age: 45
-sampling_rate: 500
-```
-
-#### 3. Análise de Exemplo
-```http
-GET /ecg/sample-analysis
-```
-
-#### 4. Status do Interpretador
-```http
-GET /ecg/status
-```
-
-### Exemplo de Resposta
-
-```json
-{
-    "analysis_id": "ECG_20250102_143022_1",
-    "timestamp": "2025-01-02T14:30:22.123456",
-    "patient_info": {
-        "patient_id": "12345",
-        "patient_name": "João Silva",
-        "patient_age": 45
-    },
-    "signal_quality": "Boa",
-    "rhythm_analysis": {
-        "rhythm": "Ritmo sinusal normal",
-        "regularity": "Regular",
-        "heart_rate": 75.2,
-        "rr_variability": 0.045
-    },
-    "r_peaks_count": 12,
-    "abnormalities": [],
-    "confidence_score": 0.85,
-    "interpretation": "Frequência cardíaca: 75.2 bpm\nRitmo: Ritmo sinusal normal\nNenhuma anormalidade significativa detectada\nCONCLUSÃO: ECG dentro dos parâmetros normais"
-}
-```
-
-## Funcionalidades do Interpretador
-
-### 1. Pré-processamento de Sinais
-- Normalização do sinal
-- Filtro passa-banda (0.5-40 Hz)
-- Remoção de baseline drift
-- Redução de ruído
-
-### 2. Detecção de Características
-- Detecção automática de picos R
-- Cálculo de intervalos RR
-- Análise de variabilidade do ritmo
-- Medição de amplitudes
-
-### 3. Análise Clínica
-- Cálculo da frequência cardíaca
-- Classificação do ritmo cardíaco
-- Detecção de arritmias
-- Identificação de anormalidades
-
-### 4. Interpretação Automática
-- Geração de relatórios textuais
-- Classificação de severidade
-- Recomendações clínicas
-- Score de confiança
+- **Múltiplas Arquiteturas**: HeartBEiT, CNN-LSTM, SE-ResNet1D, ECG Transformer
+- **Datasets Públicos**: MIT-BIH, PTB-XL, CPSC2018, MIMIC-ECG, Icentia11k
+- **Pipeline Completo**: Pré-processamento, treinamento, avaliação e exportação
+- **API REST**: Integração com o sistema principal
+- **Configuração Flexível**: Configurações modulares para diferentes cenários
 
 ## Estrutura do Projeto
 
 ```
-cardio.ai/
-├── backend/
-│   └── app/
-│       ├── api/
-│       │   ├── __init__.py
-│       │   └── ecg_api.py
-│       ├── services/
-│       │   ├── __init__.py
-│       │   └── ecg_interpreter.py
-│       ├── schemas/
-│       ├── models/
-│       ├── __init__.py
-│       └── main.py
-├── requirements.txt
-└── README.md
+backend/training/
+├── config/                 # Configurações
+│   ├── training_config.py  # Configuração principal
+│   ├── model_configs.py    # Configurações de modelos
+│   └── dataset_configs.py  # Configurações de datasets
+├── datasets/               # Implementação de datasets
+│   ├── base_dataset.py     # Classe base
+│   ├── mitbih_dataset.py   # MIT-BIH Dataset
+│   ├── ptbxl_dataset.py    # PTB-XL Dataset
+│   └── dataset_factory.py  # Fábrica de datasets
+├── models/                 # Arquiteturas de modelos
+│   ├── base_model.py       # Classe base
+│   ├── heartbeit.py        # HeartBEiT Transformer
+│   ├── cnn_lstm.py         # CNN-LSTM híbrido
+│   └── model_factory.py    # Fábrica de modelos
+├── preprocessing/          # Pré-processamento
+│   ├── filters.py          # Filtros de sinal
+│   ├── normalization.py    # Normalização
+│   └── augmentation.py     # Data augmentation
+├── trainers/              # Treinadores
+│   ├── base_trainer.py     # Classe base
+│   └── classification_trainer.py
+├── evaluation/            # Avaliação
+│   ├── metrics.py          # Métricas
+│   └── visualizations.py  # Visualizações
+├── utils/                 # Utilitários
+├── scripts/               # Scripts utilitários
+│   ├── download_datasets.py
+│   └── export_model.py
+├── api.py                 # API REST
+├── main.py                # Script principal
+└── requirements.txt       # Dependências
 ```
 
-## Desenvolvimento
+## Instalação
 
-### Executar em Modo de Desenvolvimento
+1. Instale as dependências:
+```bash
+cd backend/training
+pip install -r requirements.txt
+```
+
+2. Configure as variáveis de ambiente (opcional):
+```bash
+export TRAINING_BATCH_SIZE=32
+export TRAINING_EPOCHS=100
+export TRAINING_LEARNING_RATE=1e-4
+```
+
+## Uso Básico
+
+### 1. Download de Datasets
 
 ```bash
-cd backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python scripts/download_datasets.py --dataset ptbxl
 ```
 
-### Testes
+### 2. Treinamento de Modelo
 
 ```bash
-pytest
+python main.py --model heartbeit --dataset ptbxl --epochs 50 --batch_size 32
 ```
 
-### Documentação da API
+### 3. Exportação de Modelo
 
-Acesse `http://localhost:8000/docs` para ver a documentação interativa da API (Swagger UI).
+```bash
+python scripts/export_model.py --model_name heartbeit --checkpoint_path checkpoints/heartbeit_best.pth --num_classes 5 --format onnx
+```
+
+### 4. API REST
+
+```bash
+python api.py
+```
+
+A API estará disponível em `http://localhost:8001`
+
+## Endpoints da API
+
+- `GET /datasets` - Lista datasets disponíveis
+- `GET /models` - Lista modelos disponíveis
+- `POST /training/start` - Inicia treinamento
+- `GET /training/{job_id}/status` - Status do treinamento
+- `POST /models/export` - Exporta modelo treinado
+
+## Configuração
+
+### Configuração de Treinamento
+
+Edite `config/training_config.py` para ajustar:
+- Hiperparâmetros de treinamento
+- Caminhos de dados e checkpoints
+- Configurações de hardware
+
+### Configuração de Modelos
+
+Edite `config/model_configs.py` para:
+- Adicionar novos modelos
+- Modificar arquiteturas existentes
+- Ajustar hiperparâmetros específicos
+
+### Configuração de Datasets
+
+Edite `config/dataset_configs.py` para:
+- Adicionar novos datasets
+- Modificar metadados
+- Configurar downloads
+
+## Modelos Suportados
+
+### HeartBEiT
+- Vision Transformer adaptado para ECG
+- Baseado em BEiT (Baidu's Enhanced Image Transformer)
+- Ideal para capturar dependências de longo prazo
+
+### CNN-LSTM
+- Arquitetura híbrida
+- CNN para extração de características
+- LSTM para modelagem temporal
+
+### SE-ResNet1D
+- ResNet 1D com Squeeze-and-Excitation
+- Eficiente para sinais temporais
+- Boa performance com menos parâmetros
+
+### ECG Transformer
+- Transformer padrão adaptado para ECG
+- Attention mechanism para análise temporal
+- Flexível e interpretável
+
+## Datasets Suportados
+
+### MIT-BIH Arrhythmia Database
+- 48 registros de 30 minutos
+- Anotações de arritmias
+- Padrão para avaliação de algoritmos
+
+### PTB-XL ECG Database
+- 21.837 ECGs de 12 derivações
+- 71 diagnósticos diferentes
+- 5 superclasses principais
+
+### CPSC2018
+- 6.877 ECGs de hospitais chineses
+- 9 classes de diagnóstico
+- Dados de competição
+
+## Integração com o Sistema Principal
+
+A plataforma se integra ao CardioAI Pro através de:
+
+1. **API REST**: Endpoints para treinamento e gerenciamento
+2. **Modelos Exportados**: Compatíveis com o sistema de inferência
+3. **Configurações Compartilhadas**: Reutilização de configurações existentes
+
+## Monitoramento
+
+- **TensorBoard**: Visualização de métricas de treinamento
+- **Weights & Biases**: Experimentos e comparações (opcional)
+- **Logs**: Sistema de logging detalhado
+
+## Exemplo de Uso Completo
+
+```python
+from backend.training.datasets.dataset_factory import DatasetFactory
+from backend.training.models.model_factory import ModelFactory
+from backend.training.trainers.classification_trainer import ClassificationTrainer
+
+# 1. Carregar dataset
+dataset = DatasetFactory.create_dataset("ptbxl", "/path/to/data")
+
+# 2. Criar modelo
+model = ModelFactory.create_model("heartbeit", num_classes=5, input_channels=12)
+
+# 3. Configurar treinamento
+trainer = ClassificationTrainer(model, train_loader, val_loader, optimizer, criterion)
+
+# 4. Treinar
+trainer.train()
+
+# 5. Avaliar
+metrics = trainer.evaluate(test_loader)
+```
 
 ## Contribuição
 
-1. Faça um fork do projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abra um Pull Request
+Para adicionar novos modelos ou datasets:
+
+1. Implemente a classe base correspondente
+2. Adicione configurações apropriadas
+3. Registre na fábrica correspondente
+4. Adicione testes unitários
 
 ## Licença
 
-Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
-
-## Contato
-
-Dr. Guilherme Capel - drguilhermecapel@gmail.com
-
-Link do Projeto: [https://github.com/drguilhermecapel/cardio.ai](https://github.com/drguilhermecapel/cardio.ai)
-
-## Aviso Médico
-
-⚠️ **IMPORTANTE**: Este sistema é destinado apenas para fins educacionais e de pesquisa. Não deve ser usado para diagnóstico médico real sem supervisão de profissionais qualificados. Sempre consulte um cardiologista para interpretação clínica de ECGs.
+Este projeto está licenciado sob os mesmos termos do CardioAI Pro principal.
 
