@@ -1,0 +1,30 @@
+# Criar o arquivo requirements-ml.txt
+echo # Machine Learning Dependencies for CardioAI Pro > requirements-ml.txt
+echo # Deep Learning Framework >> requirements-ml.txt
+echo torch>=2.0.0 >> requirements-ml.txt
+echo torchvision>=0.15.0 >> requirements-ml.txt
+echo torchaudio>=2.0.0 >> requirements-ml.txt
+echo. >> requirements-ml.txt
+echo # Scientific Computing >> requirements-ml.txt
+echo numpy>=1.24.0 >> requirements-ml.txt
+echo scipy>=1.10.0 >> requirements-ml.txt
+echo pandas>=2.0.0 >> requirements-ml.txt
+echo scikit-learn>=1.3.0 >> requirements-ml.txt
+echo. >> requirements-ml.txt
+echo # ECG Processing >> requirements-ml.txt
+echo wfdb>=4.0.0 >> requirements-ml.txt
+echo h5py>=3.0.0 >> requirements-ml.txt
+echo PyWavelets>=1.4.0 >> requirements-ml.txt
+echo. >> requirements-ml.txt
+echo # Visualization >> requirements-ml.txt
+echo matplotlib>=3.7.0 >> requirements-ml.txt
+echo seaborn>=0.12.0 >> requirements-ml.txt
+echo plotly>=5.0.0 >> requirements-ml.txt
+echo. >> requirements-ml.txt
+echo # Training Tools >> requirements-ml.txt
+echo tensorboard>=2.13.0 >> requirements-ml.txt
+echo tqdm>=4.65.0 >> requirements-ml.txt
+echo. >> requirements-ml.txt
+echo # Image Processing >> requirements-ml.txt
+echo opencv-python>=4.8.0 >> requirements-ml.txt
+echo Pillow>=10.0.0 >> requirements-ml.txt

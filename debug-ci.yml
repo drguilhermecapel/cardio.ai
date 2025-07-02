@@ -1,0 +1,129 @@
+name: CI Debug Analysis
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Full Environment Dump
+        run: |
+          echo "=== OS Info ==="
+          cat /etc/os-release
+          echo "=== Memory ==="
+          free -h
+          echo "=== Disk ==="
+          df -h
+          echo "=== Process List ==="
+          ps aux | head -20
+          echo "=== Network ==="
+          netstat -tlnp 2>/dev/null || ss -tlnp
+          echo "=== Environment Variables ==="
+          env | grep -E "(DATABASE|REDIS|NODE_ENV|CI|POSTGRES)" | sort
+          echo "=== Python Version ==="
+          python --version
+          echo "=== Poetry Version ==="
+          poetry --version
+          echo "=== PostgreSQL Connection Test ==="
+          pg_isready -h localhost -p 5432 -U postgres
+          echo "=== Redis Connection Test ==="
+          redis-cli -h localhost -p 6379 ping
+      
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: |
+          poetry install --no-interaction
+          echo "=== Installed Packages ==="
+          poetry show
+      
+      - name: Database Connection Test
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key-for-debug
+          ENVIRONMENT: test
+        run: |
+          echo "=== Testing Database Connection ==="
+          poetry run python -c "
+import asyncio
+import asyncpg
+async def test_connection():
+    try:
+        conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5432/postgres')
+        print('✅ Direct asyncpg connection successful')
+        await conn.close()
+    except Exception as e:
+        print(f'❌ Direct asyncpg connection failed: {e}')
+
+    try:
+        from sqlalchemy.ext.asyncio import create_async_engine
+        engine = create_async_engine('postgresql+asyncpg://postgres:postgres@localhost:5432/postgres')
+        async with engine.begin() as conn:
+            result = await conn.execute('SELECT 1')
+            print('✅ SQLAlchemy async connection successful')
+        await engine.dispose()
+    except Exception as e:
+        print(f'❌ SQLAlchemy async connection failed: {e}')
+
+asyncio.run(test_connection())
+"
+      
+      - name: Run Single Test with Verbose Output
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key-for-debug
+          ENVIRONMENT: test
+        run: |
+          echo "=== Running Health Check Test ==="
+          poetry run pytest tests/test_health.py::test_health_check -vvs --tb=long
+      
+      - name: Upload Debug Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-debug-logs
+          path: |
+            backend/.pytest_cache/
+            backend/htmlcov/

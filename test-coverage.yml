@@ -1,0 +1,259 @@
+# .github/workflows/test-coverage.yml
+# Pipeline de CI/CD para garantir cobertura de testes adequada
+
+name: Test Coverage Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  backend-coverage:
+    name: Backend Test Coverage
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: cardioai
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: cardioai_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: backend/.venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+      
+      - name: Install dependencies
+        working-directory: ./backend
+        run: poetry install --no-interaction --no-root
+      
+      - name: Install test dependencies
+        working-directory: ./backend
+        run: |
+          poetry add --group dev pytest-cov radon bandit pip-audit || true
+          poetry install --with dev
+      
+      - name: Run tests with coverage
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://cardioai:testpass@localhost:5432/cardioai_test
+          SECRET_KEY: test-secret-key
+          ENVIRONMENT: test
+        run: |
+          poetry run pytest tests/ \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term \
+            --cov-fail-under=80
+      
+      - name: Check ML Model Service coverage
+        working-directory: ./backend
+        run: |
+          poetry run pytest tests/test_ml_model_service_coverage.py \
+            --cov=app.services.ml_model_service \
+            --cov-fail-under=80
+      
+      - name: Check Medical Components coverage (100% required)
+        working-directory: ./backend
+        run: |
+          poetry run pytest tests/test_medical_critical_components.py \
+            --cov=app.services.ecg \
+            --cov=app.services.diagnosis \
+            --cov-fail-under=100
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./backend/coverage.xml
+          flags: backend
+          name: backend-coverage
+      
+      - name: Run security audit
+        working-directory: ./backend
+        run: |
+          poetry run pip-audit || echo "Security audit completed with warnings"
+      
+      - name: Run code complexity check
+        working-directory: ./backend
+        run: |
+          poetry run radon cc app -a -nc || echo "Complexity check completed"
+      
+      - name: Archive coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-coverage-report
+          path: backend/htmlcov/
+
+  frontend-coverage:
+    name: Frontend Test Coverage
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Run tests with coverage
+        working-directory: ./frontend
+        run: npm run test -- --coverage --watchAll=false
+      
+      - name: Check global coverage threshold
+        working-directory: ./frontend
+        run: |
+          npm run test -- --coverage --watchAll=false \
+            --coverageThreshold='{"global":{"branches":80,"functions":80,"lines":80,"statements":80}}'
+      
+      - name: Check Medical Components coverage (100% required)
+        working-directory: ./frontend
+        run: |
+          npm run test -- --coverage --watchAll=false \
+            --testPathPattern="medical|ecg|diagnosis" \
+            --coverageThreshold='{"global":{"branches":100,"functions":100,"lines":100,"statements":100}}'
+      
+      - name: Generate coverage report
+        working-directory: ./frontend
+        run: |
+          npm run test -- --coverage --watchAll=false \
+            --coverageReporters=text-lcov > coverage.lcov
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./frontend/coverage.lcov
+          flags: frontend
+          name: frontend-coverage
+      
+      - name: Archive coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-coverage-report
+          path: frontend/coverage/
+
+  compliance-report:
+    name: Generate Compliance Report
+    needs: [backend-coverage, frontend-coverage]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Download backend coverage
+        uses: actions/download-artifact@v3
+        with:
+          name: backend-coverage-report
+          path: backend-coverage
+      
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v3
+        with:
+          name: frontend-coverage-report
+          path: frontend-coverage
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Generate ANVISA/FDA compliance report
+        run: |
+          python scripts/generate_compliance_coverage.py \
+            --backend-coverage backend-coverage \
+            --frontend-coverage frontend-coverage \
+            --output compliance-report.pdf
+      
+      - name: Upload compliance report
+        uses: actions/upload-artifact@v3
+        with:
+          name: compliance-coverage-report
+          path: compliance-report.pdf
+      
+      - name: Check compliance thresholds
+        run: |
+          python scripts/check_compliance_thresholds.py \
+            --report compliance-report.pdf \
+            --min-global 80 \
+            --min-critical 100
+
+  coverage-badge:
+    name: Update Coverage Badges
+    needs: [backend-coverage, frontend-coverage]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Update README badges
+        run: |
+          # Atualizar badges de cobertura no README
+          sed -i 's/coverage-[0-9]*%25/coverage-${COVERAGE}%25/g' README.md
+        env:
+          COVERAGE: ${{ needs.backend-coverage.outputs.coverage }}
+      
+      - name: Commit badge updates
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: 'README.md'
+          message: 'chore: update coverage badges'
+          default_author: github_actions
+
+  notify-status:
+    name: Notify Coverage Status
+    needs: [backend-coverage, frontend-coverage, compliance-report]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Send Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Coverage Report:
+            - Backend: ${{ needs.backend-coverage.result }}
+            - Frontend: ${{ needs.frontend-coverage.result }}
+            - Compliance: ${{ needs.compliance-report.result }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+        if: env.SLACK_WEBHOOK_URL != ''

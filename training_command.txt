@@ -1,0 +1,1 @@
+C:\Users\User\AppData\Local\Programs\Python\Python311\python.exe ensemble_ecg_training.py --data-path D:\ptb-xl\npy_lr --models cnn resnet inception attention --ensemble-method weighted_voting --epochs 50 --batch-size 32 --output-dir ensemble_ptbxl_results

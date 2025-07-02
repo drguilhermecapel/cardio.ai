@@ -1,0 +1,20 @@
+{
+    "sampling_rate": 100,
+    "signal_length": 1000,
+    "num_leads": 12,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "num_epochs": 50,
+    "early_stopping_patience": 10,
+    "use_mixed_precision": true,
+    "use_ema": true,
+    "use_tta": true,
+    "use_focal_loss": true,
+    "focal_loss_gamma": 2.0,
+    "use_adaptive_filtering": true,
+    "use_wavelet_denoising": true,
+    "augmentation_prob": 0.7,
+    "num_workers": 4,
+    "use_cache": true,
+    "cache_size": 1000
+}
