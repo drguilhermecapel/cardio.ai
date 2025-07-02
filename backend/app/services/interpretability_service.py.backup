@@ -1,0 +1,372 @@
+"""Comprehensive tests for InterpretabilityService"""
+import pytest
+import numpy as np
+from unittest.mock import Mock, patch, MagicMock, AsyncMock
+from typing import Dict, Any
+
+from app.services.interpretability_service import (
+    InterpretabilityService, 
+    ExplanationResult,
+    ClinicalUrgency
+)
+
+
+@pytest.fixture
+def service():
+    """Create InterpretabilityService instance"""
+    return InterpretabilityService()
+
+
+@pytest.fixture
+def sample_ecg_signal():
+    """Create sample ECG signal"""
+    return np.random.randn(5000, 12)  # 12-lead ECG, 5000 samples
+
+
+@pytest.fixture
+def sample_features():
+    """Create sample ECG features"""
+    return {
+        'heart_rate': 75.0,
+        'rr_std': 45.0,
+        'qrs_duration': 100.0,
+        'pr_interval': 160.0,
+        'qt_interval': 380.0,
+        'qtc': 420.0,
+        'p_wave_amplitude': 0.1,
+        'st_elevation_max': 0.05,
+        'st_depression_max': 0.02,
+        'hrv_rmssd': 45.0,
+        'spectral_entropy': 0.7,
+        'signal_quality': 0.9
+    }
+
+
+@pytest.fixture
+def sample_predictions():
+    """Create sample predictions in correct format"""
+    return {
+        'AFIB': {'confidence': 0.8, 'detected': True},
+        'STEMI': {'confidence': 0.1, 'detected': False},
+        'NORMAL': {'confidence': 0.1, 'detected': False},
+        'LBBB': {'confidence': 0.3, 'detected': False},
+        'RBBB': {'confidence': 0.2, 'detected': False}
+    }
+
+
+@pytest.fixture
+def sample_model_output():
+    """Create sample model output"""
+    return {
+        'primary_diagnosis': 'Atrial Fibrillation',
+        'confidence': 0.8,
+        'clinical_urgency': ClinicalUrgency.HIGH,
+        'detected_conditions': {
+            'AFIB': {'confidence': 0.8, 'detected': True}
+        }
+    }
+
+
+class TestInterpretabilityService:
+    """Test suite for InterpretabilityService"""
+    
+    @pytest.mark.asyncio
+    async def test_generate_comprehensive_explanation(self, service, sample_ecg_signal, sample_features, sample_predictions, sample_model_output):
+        """Test comprehensive explanation generation"""
+        result = await service.generate_comprehensive_explanation(
+            signal=sample_ecg_signal,
+            features=sample_features,
+            predictions=sample_predictions,
+            model_output=sample_model_output
+        )
+        
+        assert isinstance(result, ExplanationResult)
+        assert result.primary_diagnosis == 'AFIB'
+        assert result.confidence == 0.8
+        assert len(result.clinical_explanation) > 0
+        assert len(result.diagnostic_criteria) > 0
+        assert len(result.risk_factors) > 0
+        assert len(result.recommendations) > 0
+        assert len(result.feature_importance) > 0
+        assert result.clinical_urgency in [ClinicalUrgency.HIGH, ClinicalUrgency.MEDIUM]
+    
+    @pytest.mark.asyncio
+    async def test_generate_shap_explanation(self, service, sample_ecg_signal, sample_features, sample_predictions, sample_model_output):
+        """Test SHAP explanation generation"""
+        result = await service._generate_shap_explanation(
+            sample_ecg_signal, sample_features, sample_predictions, sample_model_output
+        )
+        
+        assert isinstance(result, dict)
+        assert 'shap_values' in result
+        assert 'base_value' in result
+        assert 'feature_importance' in result
+        assert 'lead_contributions' in result
+        assert len(result['feature_importance']) > 0
+        assert all(v >= 0 for v in result['feature_importance'].values())
+    
+    @pytest.mark.asyncio
+    async def test_generate_lime_explanation(self, service, sample_ecg_signal, sample_features, sample_predictions):
+        """Test LIME explanation generation"""
+        result = await service._generate_lime_explanation(
+            sample_ecg_signal, sample_features, sample_predictions
+        )
+        
+        assert isinstance(result, dict)
+        assert 'feature_importance' in result
+        assert 'explanation_score' in result
+        assert 'local_explanation' in result
+        assert 'top_features' in result
+        assert 0 <= result['explanation_score'] <= 1
+    
+    @pytest.mark.asyncio
+    async def test_generate_clinical_explanation(self, service, sample_features, sample_predictions):
+        """Test clinical explanation generation"""
+        shap_explanation = {
+            'lead_contributions': {'Lead_I': 0.5, 'Lead_II': 0.3},
+            'feature_importance': {'Heart Rate': 0.3}
+        }
+        
+        result = await service._generate_clinical_explanation(
+            'AFIB', sample_features, sample_predictions, shap_explanation
+        )
+        
+        assert isinstance(result, dict)
+        assert 'description' in result
+        assert 'clinical_urgency' in result
+        assert 'key_findings' in result
+        assert 'Atrial fibrillation' in result['description']
+        assert result['confidence_explanation'] is not None
+    
+    @pytest.mark.asyncio
+    async def test_error_handling_invalid_predictions(self, service, sample_ecg_signal, sample_features, sample_model_output):
+        """Test error handling with invalid predictions format"""
+        invalid_predictions = "not a dict"
+        
+        result = await service.generate_comprehensive_explanation(
+            signal=sample_ecg_signal,
+            features=sample_features,
+            predictions=invalid_predictions,
+            model_output=sample_model_output
+        )
+        
+        assert isinstance(result, ExplanationResult)
+        assert result.primary_diagnosis == 'UNKNOWN'
+        assert result.confidence == 0.0
+        assert "error" in result.clinical_explanation.lower()
+    
+    @pytest.mark.asyncio
+    async def test_different_prediction_formats(self, service, sample_ecg_signal, sample_features, sample_model_output):
+        """Test handling of different prediction formats"""
+        # Format 1: Simple confidence values
+        predictions_format1 = {
+            'AFIB': 0.8,
+            'STEMI': 0.1,
+            'NORMAL': 0.1
+        }
+        
+        result1 = await service.generate_comprehensive_explanation(
+            signal=sample_ecg_signal,
+            features=sample_features,
+            predictions=predictions_format1,
+            model_output=sample_model_output
+        )
+        
+        assert result1.primary_diagnosis == 'AFIB'
+        assert result1.confidence == 0.8
+        
+        # Format 2: Detailed format with confidence and detected
+        predictions_format2 = {
+            'AFIB': {'confidence': 0.7, 'detected': True},
+            'STEMI': {'confidence': 0.9, 'detected': False},  # Higher confidence but not detected
+            'NORMAL': {'confidence': 0.1, 'detected': False}
+        }
+        
+        result2 = await service.generate_comprehensive_explanation(
+            signal=sample_ecg_signal,
+            features=sample_features,
+            predictions=predictions_format2,
+            model_output=sample_model_output
+        )
+        
+        assert result2.primary_diagnosis == 'AFIB'  # Should pick detected condition
+        assert result2.confidence == 0.7
+    
+    @pytest.mark.asyncio
+    async def test_clinical_urgency_determination(self, service, sample_ecg_signal, sample_features, sample_model_output):
+        """Test clinical urgency determination for different conditions"""
+        # Test STEMI - should be CRITICAL
+        predictions_stemi = {
+            'STEMI': {'confidence': 0.95, 'detected': True},
+            'NORMAL': {'confidence': 0.05, 'detected': False}
+        }
+        
+        result = await service.generate_comprehensive_explanation(
+            signal=sample_ecg_signal,
+            features=sample_features,
+            predictions=predictions_stemi,
+            model_output=sample_model_output
+        )
+        
+        assert result.clinical_urgency == ClinicalUrgency.CRITICAL
+        
+        # Test NORMAL - should be LOW
+        predictions_normal = {
+            'NORMAL': {'confidence': 0.95, 'detected': True},
+            'AFIB': {'confidence': 0.05, 'detected': False}
+        }
+        
+        result = await service.generate_comprehensive_explanation(
+            signal=sample_ecg_signal,
+            features=sample_features,
+            predictions=predictions_normal,
+            model_output=sample_model_output
+        )
+        
+        assert result.clinical_urgency == ClinicalUrgency.LOW
+    
+    @pytest.mark.asyncio
+    async def test_feature_importance_extraction(self, service):
+        """Test feature importance extraction from SHAP and LIME"""
+        shap_explanation = {
+            'feature_importance': {
+                'Heart Rate': 0.3,
+                'QRS Duration': 0.2,
+                'PR Interval': 0.1
+            }
+        }
+        
+        lime_explanation = {
+            'feature_importance': {
+                'Heart Rate': 0.35,  # Overlapping feature
+                'QTc': 0.15,  # New feature
+                'ST Elevation': 0.1
+            }
+        }
+        
+        result = service._extract_feature_importance(shap_explanation, lime_explanation)
+        
+        assert isinstance(result, dict)
+        assert 'Heart Rate' in result
+        assert 'QRS Duration' in result
+        assert 'QTc' in result
+        # Check normalization
+        assert abs(sum(result.values()) - 1.0) < 0.01
+    
+    @pytest.mark.asyncio
+    async def test_diagnostic_criteria_reference(self, service, sample_features):
+        """Test diagnostic criteria reference"""
+        result = service._reference_diagnostic_criteria('AFIB', sample_features)
+        
+        assert isinstance(result, dict)
+        assert 'diagnosis' in result
+        assert result['diagnosis'] == 'AFIB'
+        assert 'icd10_code' in result
+        assert 'standard_criteria' in result
+        assert 'diagnostic_features' in result['standard_criteria']
+        assert len(result['standard_criteria']['diagnostic_features']) > 0
+    
+    @pytest.mark.asyncio
+    async def test_risk_factors_identification(self, service):
+        """Test risk factors identification"""
+        # Test tachycardia
+        features_tachy = {'heart_rate': 120, 'qtc': 440}
+        risks = service._identify_risk_factors('AFIB', features_tachy)
+        assert 'Tachycardia' in risks
+        assert 'Stroke risk' in risks
+        
+        # Test bradycardia
+        features_brady = {'heart_rate': 45, 'qtc': 490}
+        risks = service._identify_risk_factors('NORMAL', features_brady)
+        assert 'Bradycardia' in risks
+        assert 'Prolonged QTc' in risks
+    
+    @pytest.mark.asyncio
+    async def test_recommendations_generation(self, service, sample_features):
+        """Test recommendations generation"""
+        # Test AFIB recommendations
+        recs_afib = service._generate_recommendations('AFIB', sample_features)
+        assert 'CHA2DS2-VASc score' in ' '.join(recs_afib)
+        assert 'anticoagulation' in ' '.join(recs_afib).lower()
+        
+        # Test STEMI recommendations
+        recs_stemi = service._generate_recommendations('STEMI', sample_features)
+        assert 'cardiac catheterization' in ' '.join(recs_stemi).lower()
+        
+        # Test NORMAL recommendations
+        recs_normal = service._generate_recommendations('NORMAL', sample_features)
+        assert 'routine follow-up' in ' '.join(recs_normal).lower()
+    
+    def test_prepare_signal_for_shap(self, service):
+        """Test signal preparation for SHAP"""
+        # Test 1D signal
+        signal_1d = np.random.randn(1000)
+        prepared = service._prepare_signal_for_shap(signal_1d)
+        assert len(prepared.shape) == 2
+        assert prepared.shape[1] == 1
+        assert abs(np.mean(prepared)) < 0.1  # Should be normalized
+        
+        # Test 2D signal
+        signal_2d = np.random.randn(1000, 12)
+        prepared = service._prepare_signal_for_shap(signal_2d)
+        assert prepared.shape == signal_2d.shape
+    
+    @pytest.mark.asyncio
+    async def test_attention_maps_generation(self, service, sample_ecg_signal, sample_predictions):
+        """Test attention maps generation"""
+        shap_explanation = {'lead_contributions': {'Lead_I': 0.5}}
+        
+        result = await service._generate_attention_maps(
+            sample_ecg_signal, sample_predictions, shap_explanation
+        )
+        
+        assert isinstance(result, dict)
+        assert len(result) == sample_ecg_signal.shape[1]  # One map per lead
+        for lead, attention in result.items():
+            assert isinstance(attention, list)
+            assert len(attention) == sample_ecg_signal.shape[0]
+            assert all(0 <= v <= 1 for v in attention)  # Normalized values
+    
+    @pytest.mark.asyncio
+    async def test_edge_cases_empty_features(self, service, sample_ecg_signal, sample_predictions, sample_model_output):
+        """Test with empty features"""
+        empty_features = {}
+        
+        result = await service.generate_comprehensive_explanation(
+            signal=sample_ecg_signal,
+            features=empty_features,
+            predictions=sample_predictions,
+            model_output=sample_model_output
+        )
+        
+        assert isinstance(result, ExplanationResult)
+        assert result.primary_diagnosis == 'AFIB'
+        # Should still generate some explanation
+        assert len(result.clinical_explanation) > 0
+    
+    @pytest.mark.asyncio
+    async def test_consistency_across_runs(self, service, sample_ecg_signal, sample_features, sample_predictions, sample_model_output):
+        """Test consistency of explanations across multiple runs"""
+        results = []
+        
+        for _ in range(3):
+            result = await service.generate_comprehensive_explanation(
+                signal=sample_ecg_signal,
+                features=sample_features,
+                predictions=sample_predictions,
+                model_output=sample_model_output
+            )
+            results.append(result)
+        
+        # Check consistency of primary diagnosis
+        assert all(r.primary_diagnosis == results[0].primary_diagnosis for r in results)
+        
+        # Check consistency of clinical urgency
+        assert all(r.clinical_urgency == results[0].clinical_urgency for r in results)
+        
+        # Check that explanations are generated
+        assert all(len(r.clinical_explanation) > 0 for r in results)
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v'])
