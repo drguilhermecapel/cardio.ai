@@ -1,52 +1,88 @@
 """
-Modelo de análise de ECG
+Schemas para análise de ECG
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON, ForeignKey, Enum as SQLEnum
-from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.core.database import Base
-from app.core.constants import AnalysisStatus, ClinicalUrgency, DiagnosisCategory, FileType
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, ConfigDict
+from app.core.constants import FileType, AnalysisStatus, ClinicalUrgency, DiagnosisCategory
 
 
-class ECGAnalysis(Base):
-    """Modelo de análise de ECG."""
-    __tablename__ = "ecg_analyses"
+class ECGAnalysisBase(BaseModel):
+    """Schema base para análise de ECG."""
+    patient_id: int
+    file_url: str
+    file_type: FileType
     
-    id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
-    file_url = Column(String, nullable=False)
-    file_type = Column(SQLEnum(FileType), nullable=False)
     
-    status = Column(SQLEnum(AnalysisStatus), default=AnalysisStatus.PENDING, nullable=False)
-    clinical_urgency = Column(SQLEnum(ClinicalUrgency), default=ClinicalUrgency.NORMAL)
+class ECGAnalysisCreate(ECGAnalysisBase):
+    """Schema para criar análise de ECG."""
+    analysis_type: Optional[str] = "standard"
+    priority: Optional[ClinicalUrgency] = ClinicalUrgency.NORMAL
+    notes: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
     
-    # Resultados da análise
-    diagnosis = Column(String, nullable=True)
-    diagnosis_category = Column(SQLEnum(DiagnosisCategory), nullable=True)
-    findings = Column(JSON, nullable=True)
-    risk_score = Column(Float, nullable=True)
+    # Campos adicionais para compatibilidade
+    ecg_data: Optional[Dict[str, Any]] = None
+    urgency: Optional[ClinicalUrgency] = None
     
-    # Validação
-    validated = Column(Boolean, default=False)
-    validated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
-    validated_at = Column(DateTime, nullable=True)
     
-    # Metadados
-    notes = Column(String, nullable=True)
-    metadata = Column(JSON, nullable=True)
+class ECGAnalysisUpdate(BaseModel):
+    """Schema para atualizar análise de ECG."""
+    status: Optional[AnalysisStatus] = None
+    diagnosis: Optional[str] = None
+    findings: Optional[Dict[str, Any]] = None
+    risk_score: Optional[float] = Field(None, ge=0, le=1)
+    clinical_urgency: Optional[ClinicalUrgency] = None
+    notes: Optional[str] = None
+    validated: Optional[bool] = None
+    validated_by: Optional[int] = None
+    validated_at: Optional[datetime] = None
     
-    # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    model_config = ConfigDict(from_attributes=True)
     
-    # Relacionamentos
-    patient = relationship("Patient", back_populates="ecg_analyses")
-    validator = relationship("User", foreign_keys=[validated_by])
-    validations = relationship("ECGValidation", back_populates="analysis")
     
-    def __repr__(self):
-        return f"<ECGAnalysis(id={self.id}, patient_id={self.patient_id}, status={self.status})>"
+class ECGAnalysisResponse(ECGAnalysisBase):
+    """Schema de resposta para análise de ECG."""
+    id: int
+    status: AnalysisStatus
+    diagnosis: Optional[str] = None
+    findings: Optional[Dict[str, Any]] = None
+    risk_score: Optional[float] = None
+    clinical_urgency: Optional[ClinicalUrgency] = None
+    created_at: datetime
+    updated_at: datetime
+    validated: Optional[bool] = False
+    validated_by: Optional[int] = None
+    validated_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+    
 
+class ECGAnalysisList(BaseModel):
+    """Lista paginada de análises."""
+    items: List[ECGAnalysisResponse]
+    total: int
+    page: int = 1
+    pages: int = 1
+    size: int = 20
+    
 
-# Re-exportar AnalysisStatus para compatibilidade
-__all__ = ["ECGAnalysis", "AnalysisStatus"]
+class ECGValidationCreate(BaseModel):
+    """Schema para criar validação."""
+    analysis_id: int
+    notes: Optional[str] = None
+    is_correct: bool = True
+    corrections: Optional[Dict[str, Any]] = None
+    
+
+class ECGValidationResponse(BaseModel):
+    """Schema de resposta para validação."""
+    id: int
+    analysis_id: int
+    validator_id: int
+    notes: Optional[str] = None
+    is_correct: bool
+    corrections: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)

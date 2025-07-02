@@ -6,198 +6,379 @@ class Contours(_BaseTraceHierarchyType):
 
     # class properties
     # --------------------
-    _parent_path_str = "surface"
-    _path_str = "surface.contours"
-    _valid_props = {"x", "y", "z"}
+    _parent_path_str = "contour"
+    _path_str = "contour.contours"
+    _valid_props = {
+        "coloring",
+        "end",
+        "labelfont",
+        "labelformat",
+        "operation",
+        "showlabels",
+        "showlines",
+        "size",
+        "start",
+        "type",
+        "value",
+    }
 
-    # x
-    # -
+    # coloring
+    # --------
     @property
-    def x(self):
+    def coloring(self):
         """
-        The 'x' property is an instance of X
+        Determines the coloring method showing the contour values. If
+        "fill", coloring is done evenly between each contour level If
+        "heatmap", a heatmap gradient coloring is applied between each
+        contour level. If "lines", coloring is done on the contour
+        lines. If "none", no coloring is applied on this trace.
+
+        The 'coloring' property is an enumeration that may be specified as:
+          - One of the following enumeration values:
+                ['fill', 'heatmap', 'lines', 'none']
+
+        Returns
+        -------
+        Any
+        """
+        return self["coloring"]
+
+    @coloring.setter
+    def coloring(self, val):
+        self["coloring"] = val
+
+    # end
+    # ---
+    @property
+    def end(self):
+        """
+        Sets the end contour level value. Must be more than
+        `contours.start`
+
+        The 'end' property is a number and may be specified as:
+          - An int or float
+
+        Returns
+        -------
+        int|float
+        """
+        return self["end"]
+
+    @end.setter
+    def end(self, val):
+        self["end"] = val
+
+    # labelfont
+    # ---------
+    @property
+    def labelfont(self):
+        """
+        Sets the font used for labeling the contour levels. The default
+        color comes from the lines, if shown. The default family and
+        size come from `layout.font`.
+
+        The 'labelfont' property is an instance of Labelfont
         that may be specified as:
-          - An instance of :class:`plotly.graph_objs.surface.contours.X`
+          - An instance of :class:`plotly.graph_objs.contour.contours.Labelfont`
           - A dict of string/value properties that will be passed
-            to the X constructor
+            to the Labelfont constructor
 
             Supported dict properties:
 
                 color
-                    Sets the color of the contour lines.
-                end
-                    Sets the end contour level value. Must be more
-                    than `contours.start`
-                highlight
-                    Determines whether or not contour lines about
-                    the x dimension are highlighted on hover.
-                highlightcolor
-                    Sets the color of the highlighted contour
-                    lines.
-                highlightwidth
-                    Sets the width of the highlighted contour
-                    lines.
-                project
-                    :class:`plotly.graph_objects.surface.contours.x
-                    .Project` instance or dict with compatible
-                    properties
-                show
-                    Determines whether or not contour lines about
-                    the x dimension are drawn.
+
+                family
+                    HTML font family - the typeface that will be
+                    applied by the web browser. The web browser
+                    will only be able to apply a font if it is
+                    available on the system which it operates.
+                    Provide multiple font families, separated by
+                    commas, to indicate the preference in which to
+                    apply fonts if they aren't available on the
+                    system. The Chart Studio Cloud (at
+                    https://chart-studio.plotly.com or on-premise)
+                    generates images on a server, where only a
+                    select number of fonts are installed and
+                    supported. These include "Arial", "Balto",
+                    "Courier New", "Droid Sans",, "Droid Serif",
+                    "Droid Sans Mono", "Gravitas One", "Old
+                    Standard TT", "Open Sans", "Overpass", "PT Sans
+                    Narrow", "Raleway", "Times New Roman".
                 size
-                    Sets the step between each contour level. Must
-                    be positive.
-                start
-                    Sets the starting contour level value. Must be
-                    less than `contours.end`
-                usecolormap
-                    An alternate to "color". Determines whether or
-                    not the contour lines are colored using the
-                    trace "colorscale".
-                width
-                    Sets the width of the contour lines.
 
         Returns
         -------
-        plotly.graph_objs.surface.contours.X
+        plotly.graph_objs.contour.contours.Labelfont
         """
-        return self["x"]
+        return self["labelfont"]
 
-    @x.setter
-    def x(self, val):
-        self["x"] = val
+    @labelfont.setter
+    def labelfont(self, val):
+        self["labelfont"] = val
 
-    # y
-    # -
+    # labelformat
+    # -----------
     @property
-    def y(self):
+    def labelformat(self):
         """
-        The 'y' property is an instance of Y
-        that may be specified as:
-          - An instance of :class:`plotly.graph_objs.surface.contours.Y`
-          - A dict of string/value properties that will be passed
-            to the Y constructor
+        Sets the contour label formatting rule using d3 formatting
+        mini-languages which are very similar to those in Python. For
+        numbers, see:
+        https://github.com/d3/d3-format/tree/v1.4.5#d3-format.
 
-            Supported dict properties:
-
-                color
-                    Sets the color of the contour lines.
-                end
-                    Sets the end contour level value. Must be more
-                    than `contours.start`
-                highlight
-                    Determines whether or not contour lines about
-                    the y dimension are highlighted on hover.
-                highlightcolor
-                    Sets the color of the highlighted contour
-                    lines.
-                highlightwidth
-                    Sets the width of the highlighted contour
-                    lines.
-                project
-                    :class:`plotly.graph_objects.surface.contours.y
-                    .Project` instance or dict with compatible
-                    properties
-                show
-                    Determines whether or not contour lines about
-                    the y dimension are drawn.
-                size
-                    Sets the step between each contour level. Must
-                    be positive.
-                start
-                    Sets the starting contour level value. Must be
-                    less than `contours.end`
-                usecolormap
-                    An alternate to "color". Determines whether or
-                    not the contour lines are colored using the
-                    trace "colorscale".
-                width
-                    Sets the width of the contour lines.
+        The 'labelformat' property is a string and must be specified as:
+          - A string
+          - A number that will be converted to a string
 
         Returns
         -------
-        plotly.graph_objs.surface.contours.Y
+        str
         """
-        return self["y"]
+        return self["labelformat"]
 
-    @y.setter
-    def y(self, val):
-        self["y"] = val
+    @labelformat.setter
+    def labelformat(self, val):
+        self["labelformat"] = val
 
-    # z
-    # -
+    # operation
+    # ---------
     @property
-    def z(self):
+    def operation(self):
         """
-        The 'z' property is an instance of Z
-        that may be specified as:
-          - An instance of :class:`plotly.graph_objs.surface.contours.Z`
-          - A dict of string/value properties that will be passed
-            to the Z constructor
+        Sets the constraint operation. "=" keeps regions equal to
+        `value` "<" and "<=" keep regions less than `value` ">" and
+        ">=" keep regions greater than `value` "[]", "()", "[)", and
+        "(]" keep regions inside `value[0]` to `value[1]` "][", ")(",
+        "](", ")[" keep regions outside `value[0]` to value[1]` Open
+        vs. closed intervals make no difference to constraint display,
+        but all versions are allowed for consistency with filter
+        transforms.
 
-            Supported dict properties:
-
-                color
-                    Sets the color of the contour lines.
-                end
-                    Sets the end contour level value. Must be more
-                    than `contours.start`
-                highlight
-                    Determines whether or not contour lines about
-                    the z dimension are highlighted on hover.
-                highlightcolor
-                    Sets the color of the highlighted contour
-                    lines.
-                highlightwidth
-                    Sets the width of the highlighted contour
-                    lines.
-                project
-                    :class:`plotly.graph_objects.surface.contours.z
-                    .Project` instance or dict with compatible
-                    properties
-                show
-                    Determines whether or not contour lines about
-                    the z dimension are drawn.
-                size
-                    Sets the step between each contour level. Must
-                    be positive.
-                start
-                    Sets the starting contour level value. Must be
-                    less than `contours.end`
-                usecolormap
-                    An alternate to "color". Determines whether or
-                    not the contour lines are colored using the
-                    trace "colorscale".
-                width
-                    Sets the width of the contour lines.
+        The 'operation' property is an enumeration that may be specified as:
+          - One of the following enumeration values:
+                ['=', '<', '>=', '>', '<=', '[]', '()', '[)', '(]', '][',
+                ')(', '](', ')[']
 
         Returns
         -------
-        plotly.graph_objs.surface.contours.Z
+        Any
         """
-        return self["z"]
+        return self["operation"]
 
-    @z.setter
-    def z(self, val):
-        self["z"] = val
+    @operation.setter
+    def operation(self, val):
+        self["operation"] = val
+
+    # showlabels
+    # ----------
+    @property
+    def showlabels(self):
+        """
+        Determines whether to label the contour lines with their
+        values.
+
+        The 'showlabels' property must be specified as a bool
+        (either True, or False)
+
+        Returns
+        -------
+        bool
+        """
+        return self["showlabels"]
+
+    @showlabels.setter
+    def showlabels(self, val):
+        self["showlabels"] = val
+
+    # showlines
+    # ---------
+    @property
+    def showlines(self):
+        """
+        Determines whether or not the contour lines are drawn. Has an
+        effect only if `contours.coloring` is set to "fill".
+
+        The 'showlines' property must be specified as a bool
+        (either True, or False)
+
+        Returns
+        -------
+        bool
+        """
+        return self["showlines"]
+
+    @showlines.setter
+    def showlines(self, val):
+        self["showlines"] = val
+
+    # size
+    # ----
+    @property
+    def size(self):
+        """
+        Sets the step between each contour level. Must be positive.
+
+        The 'size' property is a number and may be specified as:
+          - An int or float in the interval [0, inf]
+
+        Returns
+        -------
+        int|float
+        """
+        return self["size"]
+
+    @size.setter
+    def size(self, val):
+        self["size"] = val
+
+    # start
+    # -----
+    @property
+    def start(self):
+        """
+        Sets the starting contour level value. Must be less than
+        `contours.end`
+
+        The 'start' property is a number and may be specified as:
+          - An int or float
+
+        Returns
+        -------
+        int|float
+        """
+        return self["start"]
+
+    @start.setter
+    def start(self, val):
+        self["start"] = val
+
+    # type
+    # ----
+    @property
+    def type(self):
+        """
+        If `levels`, the data is represented as a contour plot with
+        multiple levels displayed. If `constraint`, the data is
+        represented as constraints with the invalid region shaded as
+        specified by the `operation` and `value` parameters.
+
+        The 'type' property is an enumeration that may be specified as:
+          - One of the following enumeration values:
+                ['levels', 'constraint']
+
+        Returns
+        -------
+        Any
+        """
+        return self["type"]
+
+    @type.setter
+    def type(self, val):
+        self["type"] = val
+
+    # value
+    # -----
+    @property
+    def value(self):
+        """
+        Sets the value or values of the constraint boundary. When
+        `operation` is set to one of the comparison values
+        (=,<,>=,>,<=) "value" is expected to be a number. When
+        `operation` is set to one of the interval values
+        ([],(),[),(],][,)(,](,)[) "value" is expected to be an array of
+        two numbers where the first is the lower bound and the second
+        is the upper bound.
+
+        The 'value' property accepts values of any type
+
+        Returns
+        -------
+        Any
+        """
+        return self["value"]
+
+    @value.setter
+    def value(self, val):
+        self["value"] = val
 
     # Self properties description
     # ---------------------------
     @property
     def _prop_descriptions(self):
         return """\
-        x
-            :class:`plotly.graph_objects.surface.contours.X`
-            instance or dict with compatible properties
-        y
-            :class:`plotly.graph_objects.surface.contours.Y`
-            instance or dict with compatible properties
-        z
-            :class:`plotly.graph_objects.surface.contours.Z`
-            instance or dict with compatible properties
+        coloring
+            Determines the coloring method showing the contour
+            values. If "fill", coloring is done evenly between each
+            contour level If "heatmap", a heatmap gradient coloring
+            is applied between each contour level. If "lines",
+            coloring is done on the contour lines. If "none", no
+            coloring is applied on this trace.
+        end
+            Sets the end contour level value. Must be more than
+            `contours.start`
+        labelfont
+            Sets the font used for labeling the contour levels. The
+            default color comes from the lines, if shown. The
+            default family and size come from `layout.font`.
+        labelformat
+            Sets the contour label formatting rule using d3
+            formatting mini-languages which are very similar to
+            those in Python. For numbers, see:
+            https://github.com/d3/d3-format/tree/v1.4.5#d3-format.
+        operation
+            Sets the constraint operation. "=" keeps regions equal
+            to `value` "<" and "<=" keep regions less than `value`
+            ">" and ">=" keep regions greater than `value` "[]",
+            "()", "[)", and "(]" keep regions inside `value[0]` to
+            `value[1]` "][", ")(", "](", ")[" keep regions outside
+            `value[0]` to value[1]` Open vs. closed intervals make
+            no difference to constraint display, but all versions
+            are allowed for consistency with filter transforms.
+        showlabels
+            Determines whether to label the contour lines with
+            their values.
+        showlines
+            Determines whether or not the contour lines are drawn.
+            Has an effect only if `contours.coloring` is set to
+            "fill".
+        size
+            Sets the step between each contour level. Must be
+            positive.
+        start
+            Sets the starting contour level value. Must be less
+            than `contours.end`
+        type
+            If `levels`, the data is represented as a contour plot
+            with multiple levels displayed. If `constraint`, the
+            data is represented as constraints with the invalid
+            region shaded as specified by the `operation` and
+            `value` parameters.
+        value
+            Sets the value or values of the constraint boundary.
+            When `operation` is set to one of the comparison values
+            (=,<,>=,>,<=) "value" is expected to be a number. When
+            `operation` is set to one of the interval values
+            ([],(),[),(],][,)(,](,)[) "value" is expected to be an
+            array of two numbers where the first is the lower bound
+            and the second is the upper bound.
         """
 
-    def __init__(self, arg=None, x=None, y=None, z=None, **kwargs):
+    def __init__(
+        self,
+        arg=None,
+        coloring=None,
+        end=None,
+        labelfont=None,
+        labelformat=None,
+        operation=None,
+        showlabels=None,
+        showlines=None,
+        size=None,
+        start=None,
+        type=None,
+        value=None,
+        **kwargs,
+    ):
         """
         Construct a new Contours object
 
@@ -206,16 +387,62 @@ class Contours(_BaseTraceHierarchyType):
         arg
             dict of properties compatible with this constructor or
             an instance of
-            :class:`plotly.graph_objs.surface.Contours`
-        x
-            :class:`plotly.graph_objects.surface.contours.X`
-            instance or dict with compatible properties
-        y
-            :class:`plotly.graph_objects.surface.contours.Y`
-            instance or dict with compatible properties
-        z
-            :class:`plotly.graph_objects.surface.contours.Z`
-            instance or dict with compatible properties
+            :class:`plotly.graph_objs.contour.Contours`
+        coloring
+            Determines the coloring method showing the contour
+            values. If "fill", coloring is done evenly between each
+            contour level If "heatmap", a heatmap gradient coloring
+            is applied between each contour level. If "lines",
+            coloring is done on the contour lines. If "none", no
+            coloring is applied on this trace.
+        end
+            Sets the end contour level value. Must be more than
+            `contours.start`
+        labelfont
+            Sets the font used for labeling the contour levels. The
+            default color comes from the lines, if shown. The
+            default family and size come from `layout.font`.
+        labelformat
+            Sets the contour label formatting rule using d3
+            formatting mini-languages which are very similar to
+            those in Python. For numbers, see:
+            https://github.com/d3/d3-format/tree/v1.4.5#d3-format.
+        operation
+            Sets the constraint operation. "=" keeps regions equal
+            to `value` "<" and "<=" keep regions less than `value`
+            ">" and ">=" keep regions greater than `value` "[]",
+            "()", "[)", and "(]" keep regions inside `value[0]` to
+            `value[1]` "][", ")(", "](", ")[" keep regions outside
+            `value[0]` to value[1]` Open vs. closed intervals make
+            no difference to constraint display, but all versions
+            are allowed for consistency with filter transforms.
+        showlabels
+            Determines whether to label the contour lines with
+            their values.
+        showlines
+            Determines whether or not the contour lines are drawn.
+            Has an effect only if `contours.coloring` is set to
+            "fill".
+        size
+            Sets the step between each contour level. Must be
+            positive.
+        start
+            Sets the starting contour level value. Must be less
+            than `contours.end`
+        type
+            If `levels`, the data is represented as a contour plot
+            with multiple levels displayed. If `constraint`, the
+            data is represented as constraints with the invalid
+            region shaded as specified by the `operation` and
+            `value` parameters.
+        value
+            Sets the value or values of the constraint boundary.
+            When `operation` is set to one of the comparison values
+            (=,<,>=,>,<=) "value" is expected to be a number. When
+            `operation` is set to one of the interval values
+            ([],(),[),(],][,)(,](,)[) "value" is expected to be an
+            array of two numbers where the first is the lower bound
+            and the second is the upper bound.
 
         Returns
         -------
@@ -238,9 +465,9 @@ class Contours(_BaseTraceHierarchyType):
         else:
             raise ValueError(
                 """\
-The first argument to the plotly.graph_objs.surface.Contours
+The first argument to the plotly.graph_objs.contour.Contours
 constructor must be a dict or
-an instance of :class:`plotly.graph_objs.surface.Contours`"""
+an instance of :class:`plotly.graph_objs.contour.Contours`"""
             )
 
         # Handle skip_invalid
@@ -250,18 +477,50 @@ an instance of :class:`plotly.graph_objs.surface.Contours`"""
 
         # Populate data dict with properties
         # ----------------------------------
-        _v = arg.pop("x", None)
-        _v = x if x is not None else _v
+        _v = arg.pop("coloring", None)
+        _v = coloring if coloring is not None else _v
         if _v is not None:
-            self["x"] = _v
-        _v = arg.pop("y", None)
-        _v = y if y is not None else _v
+            self["coloring"] = _v
+        _v = arg.pop("end", None)
+        _v = end if end is not None else _v
         if _v is not None:
-            self["y"] = _v
-        _v = arg.pop("z", None)
-        _v = z if z is not None else _v
+            self["end"] = _v
+        _v = arg.pop("labelfont", None)
+        _v = labelfont if labelfont is not None else _v
         if _v is not None:
-            self["z"] = _v
+            self["labelfont"] = _v
+        _v = arg.pop("labelformat", None)
+        _v = labelformat if labelformat is not None else _v
+        if _v is not None:
+            self["labelformat"] = _v
+        _v = arg.pop("operation", None)
+        _v = operation if operation is not None else _v
+        if _v is not None:
+            self["operation"] = _v
+        _v = arg.pop("showlabels", None)
+        _v = showlabels if showlabels is not None else _v
+        if _v is not None:
+            self["showlabels"] = _v
+        _v = arg.pop("showlines", None)
+        _v = showlines if showlines is not None else _v
+        if _v is not None:
+            self["showlines"] = _v
+        _v = arg.pop("size", None)
+        _v = size if size is not None else _v
+        if _v is not None:
+            self["size"] = _v
+        _v = arg.pop("start", None)
+        _v = start if start is not None else _v
+        if _v is not None:
+            self["start"] = _v
+        _v = arg.pop("type", None)
+        _v = type if type is not None else _v
+        if _v is not None:
+            self["type"] = _v
+        _v = arg.pop("value", None)
+        _v = value if value is not None else _v
+        if _v is not None:
+            self["value"] = _v
 
         # Process unknown kwargs
         # ----------------------

@@ -1,328 +1,398 @@
-"""
-Script principal para treinamento de modelos de ECG
-Renomeie este arquivo de main_.py para main.py
-"""
-
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-import argparse
+import io
 import logging
-from pathlib import Path
-import sys
 import os
+import pathlib
+import shutil
+import sys
+import tempfile
+from collections import OrderedDict
+from contextlib import contextmanager
+from typing import IO, Dict, Iterable, Iterator, Mapping, Optional, Tuple, Union
 
-# Adicionar o diretório backend ao path para permitir importações
-backend_path = Path(__file__).parent.parent
-sys.path.insert(0, str(backend_path))
+from .parser import Binding, parse_stream
+from .variables import parse_variables
 
-# Importações do módulo training
-from training.config.training_config import training_config
-from training.config.model_configs import get_model_config
-from training.config.dataset_configs import get_dataset_config
-from training.datasets.dataset_factory import DatasetFactory
-from training.models.model_factory import ModelFactory
-from training.trainers.classification_trainer import ClassificationTrainer
-from training.utils.data_utils import split_dataset
-from training.utils.model_utils import get_device, count_parameters
+# A type alias for a string path to be used for the paths in this file.
+# These paths may flow to `open()` and `shutil.move()`; `shutil.move()`
+# only accepts string paths, not byte paths or file descriptors. See
+# https://github.com/python/typeshed/pull/6832.
+StrPath = Union[str, "os.PathLike[str]"]
 
-# Configuração de logging
-logging.basicConfig(
-    level=logging.INFO, 
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 
-def verify_dependencies():
-    """Verifica se todas as dependências necessárias estão instaladas"""
-    missing_deps = []
-    
-    try:
-        import wfdb
-    except ImportError:
-        missing_deps.append("wfdb")
-        
-    try:
-        import pandas
-    except ImportError:
-        missing_deps.append("pandas")
-        
-    try:
-        import numpy
-    except ImportError:
-        missing_deps.append("numpy")
-        
-    try:
-        import scipy
-    except ImportError:
-        missing_deps.append("scipy")
-        
-    if missing_deps:
-        logger.error(f"Dependências faltando: {', '.join(missing_deps)}")
-        logger.error("Execute: pip install -r backend/training/requirements.txt")
-        return False
-        
-    return True
+def with_warn_for_invalid_lines(mappings: Iterator[Binding]) -> Iterator[Binding]:
+    for mapping in mappings:
+        if mapping.error:
+            logger.warning(
+                "python-dotenv could not parse statement starting at line %s",
+                mapping.original.line,
+            )
+        yield mapping
 
 
-def setup_directories():
-    """Cria diretórios necessários"""
-    dirs = [
-        training_config.DATA_ROOT,
-        training_config.CHECKPOINT_ROOT,
-        training_config.LOG_ROOT,
-        training_config.EXPORT_ROOT
-    ]
-    
-    for dir_path in dirs:
-        dir_path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Diretório criado/verificado: {dir_path}")
+class DotEnv:
+    def __init__(
+        self,
+        dotenv_path: Optional[StrPath],
+        stream: Optional[IO[str]] = None,
+        verbose: bool = False,
+        encoding: Optional[str] = None,
+        interpolate: bool = True,
+        override: bool = True,
+    ) -> None:
+        self.dotenv_path: Optional[StrPath] = dotenv_path
+        self.stream: Optional[IO[str]] = stream
+        self._dict: Optional[Dict[str, Optional[str]]] = None
+        self.verbose: bool = verbose
+        self.encoding: Optional[str] = encoding
+        self.interpolate: bool = interpolate
+        self.override: bool = override
+
+    @contextmanager
+    def _get_stream(self) -> Iterator[IO[str]]:
+        if self.dotenv_path and os.path.isfile(self.dotenv_path):
+            with open(self.dotenv_path, encoding=self.encoding) as stream:
+                yield stream
+        elif self.stream is not None:
+            yield self.stream
+        else:
+            if self.verbose:
+                logger.info(
+                    "python-dotenv could not find configuration file %s.",
+                    self.dotenv_path or ".env",
+                )
+            yield io.StringIO("")
+
+    def dict(self) -> Dict[str, Optional[str]]:
+        """Return dotenv as dict"""
+        if self._dict:
+            return self._dict
+
+        raw_values = self.parse()
+
+        if self.interpolate:
+            self._dict = OrderedDict(
+                resolve_variables(raw_values, override=self.override)
+            )
+        else:
+            self._dict = OrderedDict(raw_values)
+
+        return self._dict
+
+    def parse(self) -> Iterator[Tuple[str, Optional[str]]]:
+        with self._get_stream() as stream:
+            for mapping in with_warn_for_invalid_lines(parse_stream(stream)):
+                if mapping.key is not None:
+                    yield mapping.key, mapping.value
+
+    def set_as_environment_variables(self) -> bool:
+        """
+        Load the current dotenv as system environment variable.
+        """
+        if not self.dict():
+            return False
+
+        for k, v in self.dict().items():
+            if k in os.environ and not self.override:
+                continue
+            if v is not None:
+                os.environ[k] = v
+
+        return True
+
+    def get(self, key: str) -> Optional[str]:
+        """ """
+        data = self.dict()
+
+        if key in data:
+            return data[key]
+
+        if self.verbose:
+            logger.warning("Key %s not found in %s.", key, self.dotenv_path)
+
+        return None
 
 
-def main(args):
-    logger.info("=" * 80)
-    logger.info("INICIANDO TREINAMENTO DE MODELO ECG - CARDIOAI PRO")
-    logger.info("=" * 80)
-    
-    # Verificar dependências
-    if not verify_dependencies():
-        return
-        
-    # Criar diretórios
-    setup_directories()
-    
-    # 1. Configurações
-    device = get_device()
-    logger.info(f"Dispositivo de treinamento: {device}")
-    
-    # Carregar configurações do dataset e modelo
-    try:
-        dataset_cfg = get_dataset_config(args.dataset)
-        model_cfg = get_model_config(args.model)
-    except ValueError as e:
-        logger.error(f"Erro ao carregar configurações: {e}")
-        return
-    
-    # Atualizar training_config com argumentos da linha de comando
-    training_config.BATCH_SIZE = args.batch_size
-    training_config.EPOCHS = args.epochs
-    training_config.LEARNING_RATE = args.lr
-    training_config.MODEL_TYPE = args.model
-    training_config.SAMPLING_RATE = dataset_cfg.sampling_rate
-    training_config.NUM_LEADS = dataset_cfg.num_leads
-    
-    logger.info(f"Configurações de Treinamento:")
-    logger.info(f"  - Modelo: {args.model}")
-    logger.info(f"  - Dataset: {args.dataset}")
-    logger.info(f"  - Batch Size: {args.batch_size}")
-    logger.info(f"  - Épocas: {args.epochs}")
-    logger.info(f"  - Learning Rate: {args.lr}")
-    logger.info(f"  - Taxa de Amostragem: {dataset_cfg.sampling_rate} Hz")
-    logger.info(f"  - Número de Derivações: {dataset_cfg.num_leads}")
-    
-    # 2. Carregar Dataset
-    dataset_path = training_config.DATA_ROOT / args.dataset
-    dataset_path.mkdir(parents=True, exist_ok=True)
-    
-    logger.info(f"\nCarregando dataset de: {dataset_path}")
-    
-    try:
-        # Criar dataset completo
-        full_dataset = DatasetFactory.create_dataset(
-            dataset_name=args.dataset,
-            data_path=dataset_path,
-            target_length=training_config.SIGNAL_LENGTH,
-            sampling_rate=training_config.SAMPLING_RATE,
-            num_leads=training_config.NUM_LEADS,
-            normalize=True,
-            augment=True,
-            filter_noise=True,
-            cache_data=False,
-            sample_limit=args.sample_limit  # Para testes rápidos
-        )
-        
-        logger.info(f"Dataset carregado com sucesso!")
-        
-    except Exception as e:
-        logger.error(f"Erro ao carregar dataset: {e}")
-        logger.error("Certifique-se de que o dataset foi baixado corretamente.")
-        return
-    
-    # Dividir o dataset
-    train_dataset, val_dataset, test_dataset = split_dataset(
-        full_dataset,
-        train_ratio=0.7,  # 70% treino
-        val_ratio=0.15,   # 15% validação
-        test_ratio=0.15   # 15% teste
-    )
-    
-    logger.info(f"\nDivisão do dataset:")
-    logger.info(f"  - Treino: {len(train_dataset)} amostras")
-    logger.info(f"  - Validação: {len(val_dataset)} amostras")
-    logger.info(f"  - Teste: {len(test_dataset)} amostras")
-    
-    # Criar DataLoaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=training_config.BATCH_SIZE,
-        shuffle=True,
-        num_workers=training_config.NUM_WORKERS if device.type == 'cuda' else 0,
-        pin_memory=training_config.PIN_MEMORY and device.type == 'cuda'
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=training_config.BATCH_SIZE,
-        shuffle=False,
-        num_workers=training_config.NUM_WORKERS if device.type == 'cuda' else 0,
-        pin_memory=training_config.PIN_MEMORY and device.type == 'cuda'
-    )
-    
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=training_config.BATCH_SIZE,
-        shuffle=False,
-        num_workers=training_config.NUM_WORKERS if device.type == 'cuda' else 0,
-        pin_memory=training_config.PIN_MEMORY and device.type == 'cuda'
-    )
-    
-    # 3. Inicializar Modelo
-    logger.info(f"\nInicializando modelo {args.model}...")
-    
-    # Obter número de classes do dataset
-    num_classes = len(dataset_cfg.classes)
-    
-    try:
-        model = ModelFactory.create_model(
-            model_name=args.model,
-            num_classes=num_classes,
-            input_channels=training_config.NUM_LEADS,
-            pretrained_path=args.pretrained_path
-        )
-        model = model.to(device)
-        
-        param_count = count_parameters(model)
-        logger.info(f"Modelo criado com {param_count:,} parâmetros")
-        
-    except Exception as e:
-        logger.error(f"Erro ao criar modelo: {e}")
-        return
-    
-    # 4. Otimizador e Função de Perda
-    optimizer = torch.optim.Adam(
-        model.parameters(), 
-        lr=training_config.LEARNING_RATE,
-        weight_decay=1e-5
-    )
-    
-    # Scheduler para reduzir LR
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, 
-        mode='min', 
-        factor=0.5, 
-        patience=5
-    )    
-    # Função de perda com pesos para classes desbalanceadas
-    if args.weighted_loss:
-        # Calcular pesos das classes baseado na frequência
-        class_counts = torch.bincount(torch.tensor(train_dataset.labels))
-        class_weights = 1.0 / class_counts.float()
-        class_weights = class_weights / class_weights.sum() * len(class_weights)
-        criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
-        logger.info("Usando perda ponderada para classes desbalanceadas")
+def get_key(
+    dotenv_path: StrPath,
+    key_to_get: str,
+    encoding: Optional[str] = "utf-8",
+) -> Optional[str]:
+    """
+    Get the value of a given key from the given .env.
+
+    Returns `None` if the key isn't found or doesn't have a value.
+    """
+    return DotEnv(dotenv_path, verbose=True, encoding=encoding).get(key_to_get)
+
+
+@contextmanager
+def rewrite(
+    path: StrPath,
+    encoding: Optional[str],
+) -> Iterator[Tuple[IO[str], IO[str]]]:
+    pathlib.Path(path).touch()
+
+    with tempfile.NamedTemporaryFile(mode="w", encoding=encoding, delete=False) as dest:
+        error = None
+        try:
+            with open(path, encoding=encoding) as source:
+                yield (source, dest)
+        except BaseException as err:
+            error = err
+
+    if error is None:
+        shutil.move(dest.name, path)
     else:
-        criterion = nn.CrossEntropyLoss()
-    
-    # 5. Criar Treinador
-    logger.info("\nInicializando treinador...")
-    
-    trainer = ClassificationTrainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        optimizer=optimizer,
-        criterion=criterion,
-        device=device,
-        config=training_config,
-        scheduler=scheduler
+        os.unlink(dest.name)
+        raise error from None
+
+
+def set_key(
+    dotenv_path: StrPath,
+    key_to_set: str,
+    value_to_set: str,
+    quote_mode: str = "always",
+    export: bool = False,
+    encoding: Optional[str] = "utf-8",
+) -> Tuple[Optional[bool], str, str]:
+    """
+    Adds or Updates a key/value to the given .env
+
+    If the .env path given doesn't exist, fails instead of risking creating
+    an orphan .env somewhere in the filesystem
+    """
+    if quote_mode not in ("always", "auto", "never"):
+        raise ValueError(f"Unknown quote_mode: {quote_mode}")
+
+    quote = quote_mode == "always" or (
+        quote_mode == "auto" and not value_to_set.isalnum()
     )
-    
-    # 6. Treinar
-    logger.info("\n" + "=" * 80)
-    logger.info("INICIANDO TREINAMENTO")
-    logger.info("=" * 80)
-    
-    try:
-        trainer.train()
-    except KeyboardInterrupt:
-        logger.info("\nTreinamento interrompido pelo usuário")
-    except Exception as e:
-        logger.error(f"Erro durante treinamento: {e}")
-        return
-    
-    # 7. Avaliar no conjunto de teste
-    logger.info("\n" + "=" * 80)
-    logger.info("AVALIAÇÃO FINAL NO CONJUNTO DE TESTE")
-    logger.info("=" * 80)
-    
-    test_metrics = trainer.evaluate(test_loader)
-    
-    logger.info("\nMétricas de Teste:")
-    for metric, value in test_metrics.items():
-        logger.info(f"  - {metric}: {value:.4f}")
-    
-    # 8. Salvar modelo final
-    if args.save_model:
-        model_path = training_config.EXPORT_ROOT / f"{args.model}_{args.dataset}_final.pth"
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            'config': {
-                'model_name': args.model,
-                'num_classes': num_classes,
-                'input_channels': training_config.NUM_LEADS,
-                'dataset': args.dataset
-            },
-            'test_metrics': test_metrics
-        }, model_path)
-        logger.info(f"\nModelo salvo em: {model_path}")
-    
-    logger.info("\n" + "=" * 80)
-    logger.info("TREINAMENTO CONCLUÍDO COM SUCESSO!")
-    logger.info("=" * 80)
+
+    if quote:
+        value_out = "'{}'".format(value_to_set.replace("'", "\\'"))
+    else:
+        value_out = value_to_set
+    if export:
+        line_out = f"export {key_to_set}={value_out}\n"
+    else:
+        line_out = f"{key_to_set}={value_out}\n"
+
+    with rewrite(dotenv_path, encoding=encoding) as (source, dest):
+        replaced = False
+        missing_newline = False
+        for mapping in with_warn_for_invalid_lines(parse_stream(source)):
+            if mapping.key == key_to_set:
+                dest.write(line_out)
+                replaced = True
+            else:
+                dest.write(mapping.original.string)
+                missing_newline = not mapping.original.string.endswith("\n")
+        if not replaced:
+            if missing_newline:
+                dest.write("\n")
+            dest.write(line_out)
+
+    return True, key_to_set, value_to_set
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Script de Treinamento de Modelos ECG - CardioAI Pro")
-    
-    # Argumentos principais
-    parser.add_argument("--model", type=str, default="cnn_lstm",
-                        choices=["heartbeit", "cnn_lstm", "se_resnet1d", "ecg_transformer"],
-                        help="Arquitetura do modelo")
-    parser.add_argument("--dataset", type=str, default="ptbxl",
-                        choices=["ptbxl", "mitbih", "cpsc2018"],
-                        help="Dataset a ser usado")
-    
-    # Hiperparâmetros
-    parser.add_argument("--batch_size", type=int, default=32,
-                        help="Tamanho do batch")
-    parser.add_argument("--epochs", type=int, default=50,
-                        help="Número de épocas")
-    parser.add_argument("--lr", type=float, default=1e-4,
-                        help="Learning rate inicial")
-    
-    # Opções adicionais
-    parser.add_argument("--pretrained_path", type=str, default=None,
-                        help="Caminho para pesos pré-treinados")
-    parser.add_argument("--sample_limit", type=int, default=None,
-                        help="Limite de amostras para teste rápido")
-    parser.add_argument("--weighted_loss", action="store_true",
-                        help="Usar perda ponderada para classes desbalanceadas")
-    parser.add_argument("--save_model", action="store_true", default=True,
-                        help="Salvar modelo após treinamento")
-    
-    args = parser.parse_args()
-    
-    # Executar treinamento
-    main(args)
+def unset_key(
+    dotenv_path: StrPath,
+    key_to_unset: str,
+    quote_mode: str = "always",
+    encoding: Optional[str] = "utf-8",
+) -> Tuple[Optional[bool], str]:
+    """
+    Removes a given key from the given `.env` file.
 
+    If the .env path given doesn't exist, fails.
+    If the given key doesn't exist in the .env, fails.
+    """
+    if not os.path.exists(dotenv_path):
+        logger.warning("Can't delete from %s - it doesn't exist.", dotenv_path)
+        return None, key_to_unset
+
+    removed = False
+    with rewrite(dotenv_path, encoding=encoding) as (source, dest):
+        for mapping in with_warn_for_invalid_lines(parse_stream(source)):
+            if mapping.key == key_to_unset:
+                removed = True
+            else:
+                dest.write(mapping.original.string)
+
+    if not removed:
+        logger.warning(
+            "Key %s not removed from %s - key doesn't exist.", key_to_unset, dotenv_path
+        )
+        return None, key_to_unset
+
+    return removed, key_to_unset
+
+
+def resolve_variables(
+    values: Iterable[Tuple[str, Optional[str]]],
+    override: bool,
+) -> Mapping[str, Optional[str]]:
+    new_values: Dict[str, Optional[str]] = {}
+
+    for name, value in values:
+        if value is None:
+            result = None
+        else:
+            atoms = parse_variables(value)
+            env: Dict[str, Optional[str]] = {}
+            if override:
+                env.update(os.environ)  # type: ignore
+                env.update(new_values)
+            else:
+                env.update(new_values)
+                env.update(os.environ)  # type: ignore
+            result = "".join(atom.resolve(env) for atom in atoms)
+
+        new_values[name] = result
+
+    return new_values
+
+
+def _walk_to_root(path: str) -> Iterator[str]:
+    """
+    Yield directories starting from the given directory up to the root
+    """
+    if not os.path.exists(path):
+        raise IOError("Starting path not found")
+
+    if os.path.isfile(path):
+        path = os.path.dirname(path)
+
+    last_dir = None
+    current_dir = os.path.abspath(path)
+    while last_dir != current_dir:
+        yield current_dir
+        parent_dir = os.path.abspath(os.path.join(current_dir, os.path.pardir))
+        last_dir, current_dir = current_dir, parent_dir
+
+
+def find_dotenv(
+    filename: str = ".env",
+    raise_error_if_not_found: bool = False,
+    usecwd: bool = False,
+) -> str:
+    """
+    Search in increasingly higher folders for the given file
+
+    Returns path to the file if found, or an empty string otherwise
+    """
+
+    def _is_interactive():
+        """Decide whether this is running in a REPL or IPython notebook"""
+        try:
+            main = __import__("__main__", None, None, fromlist=["__file__"])
+        except ModuleNotFoundError:
+            return False
+        return not hasattr(main, "__file__")
+
+    def _is_debugger():
+        return sys.gettrace() is not None
+
+    if usecwd or _is_interactive() or _is_debugger() or getattr(sys, "frozen", False):
+        # Should work without __file__, e.g. in REPL or IPython notebook.
+        path = os.getcwd()
+    else:
+        # will work for .py files
+        frame = sys._getframe()
+        current_file = __file__
+
+        while frame.f_code.co_filename == current_file or not os.path.exists(
+            frame.f_code.co_filename
+        ):
+            assert frame.f_back is not None
+            frame = frame.f_back
+        frame_filename = frame.f_code.co_filename
+        path = os.path.dirname(os.path.abspath(frame_filename))
+
+    for dirname in _walk_to_root(path):
+        check_path = os.path.join(dirname, filename)
+        if os.path.isfile(check_path):
+            return check_path
+
+    if raise_error_if_not_found:
+        raise IOError("File not found")
+
+    return ""
+
+
+def load_dotenv(
+    dotenv_path: Optional[StrPath] = None,
+    stream: Optional[IO[str]] = None,
+    verbose: bool = False,
+    override: bool = False,
+    interpolate: bool = True,
+    encoding: Optional[str] = "utf-8",
+) -> bool:
+    """Parse a .env file and then load all the variables found as environment variables.
+
+    Parameters:
+        dotenv_path: Absolute or relative path to .env file.
+        stream: Text stream (such as `io.StringIO`) with .env content, used if
+            `dotenv_path` is `None`.
+        verbose: Whether to output a warning the .env file is missing.
+        override: Whether to override the system environment variables with the variables
+            from the `.env` file.
+        encoding: Encoding to be used to read the file.
+    Returns:
+        Bool: True if at least one environment variable is set else False
+
+    If both `dotenv_path` and `stream` are `None`, `find_dotenv()` is used to find the
+    .env file with it's default parameters. If you need to change the default parameters
+    of `find_dotenv()`, you can explicitly call `find_dotenv()` and pass the result
+    to this function as `dotenv_path`.
+    """
+    if dotenv_path is None and stream is None:
+        dotenv_path = find_dotenv()
+
+    dotenv = DotEnv(
+        dotenv_path=dotenv_path,
+        stream=stream,
+        verbose=verbose,
+        interpolate=interpolate,
+        override=override,
+        encoding=encoding,
+    )
+    return dotenv.set_as_environment_variables()
+
+
+def dotenv_values(
+    dotenv_path: Optional[StrPath] = None,
+    stream: Optional[IO[str]] = None,
+    verbose: bool = False,
+    interpolate: bool = True,
+    encoding: Optional[str] = "utf-8",
+) -> Dict[str, Optional[str]]:
+    """
+    Parse a .env file and return its content as a dict.
+
+    The returned dict will have `None` values for keys without values in the .env file.
+    For example, `foo=bar` results in `{"foo": "bar"}` whereas `foo` alone results in
+    `{"foo": None}`
+
+    Parameters:
+        dotenv_path: Absolute or relative path to the .env file.
+        stream: `StringIO` object with .env content, used if `dotenv_path` is `None`.
+        verbose: Whether to output a warning if the .env file is missing.
+        encoding: Encoding to be used to read the file.
+
+    If both `dotenv_path` and `stream` are `None`, `find_dotenv()` is used to find the
+    .env file.
+    """
+    if dotenv_path is None and stream is None:
+        dotenv_path = find_dotenv()
+
+    return DotEnv(
+        dotenv_path=dotenv_path,
+        stream=stream,
+        verbose=verbose,
+        interpolate=interpolate,
+        override=True,
+        encoding=encoding,
+    ).dict()

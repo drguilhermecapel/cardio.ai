@@ -1,86 +1,111 @@
-"""Useful decorators for Traitlets users."""
-from __future__ import annotations
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+# CREATED:2015-02-15 10:06:03 by Brian McFee <brian.mcfee@nyu.edu>
+"""Helpful tools for deprecation"""
 
-import copy
-from inspect import Parameter, Signature, signature
-from typing import Any, Type, TypeVar
-
-from ..traitlets import HasTraits, Undefined
-
-
-def _get_default(value: Any) -> Any:
-    """Get default argument value, given the trait default value."""
-    return Parameter.empty if value == Undefined else value
+import warnings
+from inspect import signature, isclass, Parameter
+from functools import wraps
+from decorator import decorator
 
 
-T = TypeVar("T", bound=HasTraits)
+__all__ = ["moved", "deprecated", "deprecate_positional_args"]
 
 
-def signature_has_traits(cls: Type[T]) -> Type[T]:
-    """Return a decorated class with a constructor signature that contain Trait names as kwargs."""
-    traits = [
-        (name, _get_default(value.default_value))
-        for name, value in cls.class_traits().items()
-        if not name.startswith("_")
-    ]
+def moved(*, moved_from, version, version_removed):
+    """This is a decorator which can be used to mark functions
+    as moved/renamed.
 
-    # Taking the __init__ signature, as the cls signature is not initialized yet
-    old_signature = signature(cls.__init__)
-    old_parameter_names = list(old_signature.parameters)
+    It will result in a warning being emitted when the function is used.
+    """
 
-    old_positional_parameters = []
-    old_var_positional_parameter = None  # This won't be None if the old signature contains *args
-    old_keyword_only_parameters = []
-    old_var_keyword_parameter = None  # This won't be None if the old signature contains **kwargs
-
-    for parameter_name in old_signature.parameters:
-        # Copy the parameter
-        parameter = copy.copy(old_signature.parameters[parameter_name])
-
-        if (
-            parameter.kind is Parameter.POSITIONAL_ONLY
-            or parameter.kind is Parameter.POSITIONAL_OR_KEYWORD
-        ):
-            old_positional_parameters.append(parameter)
-
-        elif parameter.kind is Parameter.VAR_POSITIONAL:
-            old_var_positional_parameter = parameter
-
-        elif parameter.kind is Parameter.KEYWORD_ONLY:
-            old_keyword_only_parameters.append(parameter)
-
-        elif parameter.kind is Parameter.VAR_KEYWORD:
-            old_var_keyword_parameter = parameter
-
-    # Unfortunately, if the old signature does not contain **kwargs, we can't do anything,
-    # because it can't accept traits as keyword arguments
-    if old_var_keyword_parameter is None:
-        raise RuntimeError(
-            f"The {cls} constructor does not take **kwargs, which means that the signature can not be expanded with trait names"
+    def __wrapper(func, *args, **kwargs):
+        """Warn the user, and then proceed."""
+        warnings.warn(
+            "{:s}\n\tThis function was moved to '{:s}.{:s}' in "
+            "librosa version {:s}."
+            "\n\tThis alias will be removed in librosa version "
+            "{:s}.".format(
+                moved_from, func.__module__, func.__name__, version, version_removed
+            ),
+            category=DeprecationWarning,
+            stacklevel=3,  # Would be 2, but the decorator adds a level
         )
+        return func(*args, **kwargs)
 
-    new_parameters = []
+    return decorator(__wrapper)
 
-    # Append the old positional parameters (except `self` which is the first parameter)
-    new_parameters += old_positional_parameters[1:]
 
-    # Append *args if the old signature had it
-    if old_var_positional_parameter is not None:
-        new_parameters.append(old_var_positional_parameter)
+def deprecated(*, version, version_removed):
+    """This is a decorator which can be used to mark functions
+    as deprecated.
 
-    # Append the old keyword only parameters
-    new_parameters += old_keyword_only_parameters
+    It will result in a warning being emitted when the function is used."""
 
-    # Append trait names as keyword only parameters in the signature
-    new_parameters += [
-        Parameter(name, kind=Parameter.KEYWORD_ONLY, default=default)
-        for name, default in traits
-        if name not in old_parameter_names
-    ]
+    def __wrapper(func, *args, **kwargs):
+        """Warn the user, and then proceed."""
+        warnings.warn(
+            "{:s}.{:s}\n\tDeprecated as of librosa version {:s}."
+            "\n\tIt will be removed in librosa version {:s}.".format(
+                func.__module__, func.__name__, version, version_removed
+            ),
+            category=DeprecationWarning,
+            stacklevel=3,  # Would be 2, but the decorator adds a level
+        )
+        return func(*args, **kwargs)
 
-    # Append **kwargs
-    new_parameters.append(old_var_keyword_parameter)
+    return decorator(__wrapper)
 
-    cls.__signature__ = Signature(new_parameters)  # type:ignore[attr-defined]
 
-    return cls
+# Borrowed from sklearn
+def deprecate_positional_args(func=None, *, version="0.10"):
+    """Decorator for methods that issues warnings for positional arguments.
+    Using the keyword-only argument syntax in pep 3102, arguments after the
+    * will issue a warning when passed as a positional argument.
+    Parameters
+    ----------
+    func : callable, default=None
+        Function to check arguments on.
+    version : callable, default="0.10"
+        The version when positional arguments will result in error.
+    """
+
+    def _inner_deprecate_positional_args(f):
+        sig = signature(f)
+        kwonly_args = []
+        all_args = []
+
+        for name, param in sig.parameters.items():
+            if param.kind == Parameter.POSITIONAL_OR_KEYWORD:
+                all_args.append(name)
+            elif param.kind == Parameter.KEYWORD_ONLY:
+                kwonly_args.append(name)
+
+        @wraps(f)
+        def inner_f(*args, **kwargs):
+            extra_args = len(args) - len(all_args)
+            if extra_args <= 0:
+                return f(*args, **kwargs)
+
+            # extra_args > 0
+            args_msg = [
+                "{}={}".format(name, arg)
+                for name, arg in zip(kwonly_args[:extra_args], args[-extra_args:])
+            ]
+            args_msg = ", ".join(args_msg)
+            warnings.warn(
+                f"Pass {args_msg} as keyword args. From version "
+                f"{version} passing these as positional arguments "
+                "will result in an error",
+                FutureWarning,
+                stacklevel=2,
+            )
+            kwargs.update(zip(sig.parameters, args))
+            return f(**kwargs)
+
+        return inner_f
+
+    if func is not None:
+        return _inner_deprecate_positional_args(func)
+
+    return _inner_deprecate_positional_args

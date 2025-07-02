@@ -1,46 +1,95 @@
+"""Filter factories to hide or show sets of nodes and edges.
 
+These filters return the function used when creating `SubGraph`.
 """
-Funções de filtragem para sinais ECG
-"""
 
-import numpy as np
-from scipy.signal import butter, lfilter, resample
-import logging
+__all__ = [
+    "no_filter",
+    "hide_nodes",
+    "hide_edges",
+    "hide_multiedges",
+    "hide_diedges",
+    "hide_multidiedges",
+    "show_nodes",
+    "show_edges",
+    "show_multiedges",
+    "show_diedges",
+    "show_multidiedges",
+]
 
-logger = logging.getLogger(__name__)
+
+def no_filter(*items):
+    """Returns a filter function that always evaluates to True."""
+    return True
 
 
-class ECGFilters:
-    """Coleção de filtros para sinais ECG"""
-    
-    def __init__(self, sampling_rate: int = 500):
-        self.sampling_rate = sampling_rate
-        
-    def butter_bandpass(self, lowcut, highcut, order=5):
-        nyq = 0.5 * self.sampling_rate
-        low = lowcut / nyq
-        high = highcut / nyq
-        b, a = butter(order, [low, high], btype='band')
-        return b, a
+def hide_nodes(nodes):
+    """Returns a filter function that hides specific nodes."""
+    nodes = set(nodes)
+    return lambda node: node not in nodes
 
-    def bandpass_filter(self, data, lowcut=0.5, highcut=40.0, order=5):
-        """Aplica um filtro passa-banda ao sinal ECG."""
-        b, a = self.butter_bandpass(lowcut, highcut, order=order)
-        y = lfilter(b, a, data)
-        return y
-        
-    def resample(self, signal: np.ndarray, original_sampling_rate: int, target_sampling_rate: int) -> np.ndarray:
-        """Resample o sinal ECG para uma nova taxa de amostragem."""
-        if original_sampling_rate == target_sampling_rate:
-            return signal
-            
-        num_samples = int(signal.shape[-1] * target_sampling_rate / original_sampling_rate)
-        
-        # Resample cada derivação independentemente
-        resampled_signal = np.zeros((signal.shape[0], num_samples))
-        for i in range(signal.shape[0]):
-            resampled_signal[i, :] = resample(signal[i, :], num_samples)
-            
-        logger.debug(f"Sinal reamostrado de {original_sampling_rate}Hz para {target_sampling_rate}Hz. "
-                     f"De {signal.shape[-1]} para {resampled_signal.shape[-1]} amostras.")
-        return resampled_signal
+
+def hide_diedges(edges):
+    """Returns a filter function that hides specific directed edges."""
+    edges = {(u, v) for u, v in edges}
+    return lambda u, v: (u, v) not in edges
+
+
+def hide_edges(edges):
+    """Returns a filter function that hides specific undirected edges."""
+    alledges = set(edges) | {(v, u) for (u, v) in edges}
+    return lambda u, v: (u, v) not in alledges
+
+
+def hide_multidiedges(edges):
+    """Returns a filter function that hides specific multi-directed edges."""
+    edges = {(u, v, k) for u, v, k in edges}
+    return lambda u, v, k: (u, v, k) not in edges
+
+
+def hide_multiedges(edges):
+    """Returns a filter function that hides specific multi-undirected edges."""
+    alledges = set(edges) | {(v, u, k) for (u, v, k) in edges}
+    return lambda u, v, k: (u, v, k) not in alledges
+
+
+# write show_nodes as a class to make SubGraph pickleable
+class show_nodes:
+    """Filter class to show specific nodes.
+
+    Attach the set of nodes as an attribute to speed up this commonly used filter
+
+    Note that another allowed attribute for filters is to store the number of nodes
+    on the filter as attribute `length` (used in `__len__`). It is a user
+    responsibility to ensure this attribute is accurate if present.
+    """
+
+    def __init__(self, nodes):
+        self.nodes = set(nodes)
+
+    def __call__(self, node):
+        return node in self.nodes
+
+
+def show_diedges(edges):
+    """Returns a filter function that shows specific directed edges."""
+    edges = {(u, v) for u, v in edges}
+    return lambda u, v: (u, v) in edges
+
+
+def show_edges(edges):
+    """Returns a filter function that shows specific undirected edges."""
+    alledges = set(edges) | {(v, u) for (u, v) in edges}
+    return lambda u, v: (u, v) in alledges
+
+
+def show_multidiedges(edges):
+    """Returns a filter function that shows specific multi-directed edges."""
+    edges = {(u, v, k) for u, v, k in edges}
+    return lambda u, v, k: (u, v, k) in edges
+
+
+def show_multiedges(edges):
+    """Returns a filter function that shows specific multi-undirected edges."""
+    alledges = set(edges) | {(v, u, k) for (u, v, k) in edges}
+    return lambda u, v, k: (u, v, k) in alledges

@@ -1,734 +1,585 @@
-"""Functions used by least-squares algorithms."""
-from math import copysign
+"""
+Module consolidating common testing functions for checking plotting.
+"""
+
+from __future__ import annotations
+
+from typing import (
+    TYPE_CHECKING,
+    Sequence,
+)
 
 import numpy as np
-from numpy.linalg import norm
 
-from scipy.linalg import cho_factor, cho_solve, LinAlgError
-from scipy.sparse import issparse
-from scipy.sparse.linalg import LinearOperator, aslinearoperator
+from pandas.util._decorators import cache_readonly
+import pandas.util._test_decorators as td
+
+from pandas.core.dtypes.api import is_list_like
+
+import pandas as pd
+from pandas import Series
+import pandas._testing as tm
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
 
 
-EPS = np.finfo(float).eps
-
-
-# Functions related to a trust-region problem.
-
-
-def intersect_trust_region(x, s, Delta):
-    """Find the intersection of a line with the boundary of a trust region.
-
-    This function solves the quadratic equation with respect to t
-    ||(x + s*t)||**2 = Delta**2.
-
-    Returns
-    -------
-    t_neg, t_pos : tuple of float
-        Negative and positive roots.
-
-    Raises
-    ------
-    ValueError
-        If `s` is zero or `x` is not within the trust region.
+@td.skip_if_no_mpl
+class TestPlotBase:
     """
-    a = np.dot(s, s)
-    if a == 0:
-        raise ValueError("`s` is zero.")
-
-    b = np.dot(x, s)
-
-    c = np.dot(x, x) - Delta**2
-    if c > 0:
-        raise ValueError("`x` is not within the trust region.")
-
-    d = np.sqrt(b*b - a*c)  # Root from one fourth of the discriminant.
-
-    # Computations below avoid loss of significance, see "Numerical Recipes".
-    q = -(b + copysign(d, b))
-    t1 = q / a
-    t2 = c / q
-
-    if t1 < t2:
-        return t1, t2
-    else:
-        return t2, t1
-
-
-def solve_lsq_trust_region(n, m, uf, s, V, Delta, initial_alpha=None,
-                           rtol=0.01, max_iter=10):
-    """Solve a trust-region problem arising in least-squares minimization.
-
-    This function implements a method described by J. J. More [1]_ and used
-    in MINPACK, but it relies on a single SVD of Jacobian instead of series
-    of Cholesky decompositions. Before running this function, compute:
-    ``U, s, VT = svd(J, full_matrices=False)``.
-
-    Parameters
-    ----------
-    n : int
-        Number of variables.
-    m : int
-        Number of residuals.
-    uf : ndarray
-        Computed as U.T.dot(f).
-    s : ndarray
-        Singular values of J.
-    V : ndarray
-        Transpose of VT.
-    Delta : float
-        Radius of a trust region.
-    initial_alpha : float, optional
-        Initial guess for alpha, which might be available from a previous
-        iteration. If None, determined automatically.
-    rtol : float, optional
-        Stopping tolerance for the root-finding procedure. Namely, the
-        solution ``p`` will satisfy ``abs(norm(p) - Delta) < rtol * Delta``.
-    max_iter : int, optional
-        Maximum allowed number of iterations for the root-finding procedure.
-
-    Returns
-    -------
-    p : ndarray, shape (n,)
-        Found solution of a trust-region problem.
-    alpha : float
-        Positive value such that (J.T*J + alpha*I)*p = -J.T*f.
-        Sometimes called Levenberg-Marquardt parameter.
-    n_iter : int
-        Number of iterations made by root-finding procedure. Zero means
-        that Gauss-Newton step was selected as the solution.
-
-    References
-    ----------
-    .. [1] More, J. J., "The Levenberg-Marquardt Algorithm: Implementation
-           and Theory," Numerical Analysis, ed. G. A. Watson, Lecture Notes
-           in Mathematics 630, Springer Verlag, pp. 105-116, 1977.
+    This is a common base class used for various plotting tests
     """
-    def phi_and_derivative(alpha, suf, s, Delta):
-        """Function of which to find zero.
 
-        It is defined as "norm of regularized (by alpha) least-squares
-        solution minus `Delta`". Refer to [1]_.
+    def setup_method(self):
+        import matplotlib as mpl
+
+        mpl.rcdefaults()
+
+    def teardown_method(self):
+        tm.close()
+
+    @cache_readonly
+    def plt(self):
+        import matplotlib.pyplot as plt
+
+        return plt
+
+    @cache_readonly
+    def colorconverter(self):
+        from matplotlib import colors
+
+        return colors.colorConverter
+
+    def _check_legend_labels(self, axes, labels=None, visible=True):
         """
-        denom = s**2 + alpha
-        p_norm = norm(suf / denom)
-        phi = p_norm - Delta
-        phi_prime = -np.sum(suf ** 2 / denom**3) / p_norm
-        return phi, phi_prime
+        Check each axes has expected legend labels
 
-    suf = s * uf
+        Parameters
+        ----------
+        axes : matplotlib Axes object, or its list-like
+        labels : list-like
+            expected legend labels
+        visible : bool
+            expected legend visibility. labels are checked only when visible is
+            True
+        """
+        if visible and (labels is None):
+            raise ValueError("labels must be specified when visible is True")
+        axes = self._flatten_visible(axes)
+        for ax in axes:
+            if visible:
+                assert ax.get_legend() is not None
+                self._check_text_labels(ax.get_legend().get_texts(), labels)
+            else:
+                assert ax.get_legend() is None
 
-    # Check if J has full rank and try Gauss-Newton step.
-    if m >= n:
-        threshold = EPS * m * s[0]
-        full_rank = s[-1] > threshold
-    else:
-        full_rank = False
+    def _check_legend_marker(self, ax, expected_markers=None, visible=True):
+        """
+        Check ax has expected legend markers
 
-    if full_rank:
-        p = -V.dot(uf / s)
-        if norm(p) <= Delta:
-            return p, 0.0, 0
+        Parameters
+        ----------
+        ax : matplotlib Axes object
+        expected_markers : list-like
+            expected legend markers
+        visible : bool
+            expected legend visibility. labels are checked only when visible is
+            True
+        """
+        if visible and (expected_markers is None):
+            raise ValueError("Markers must be specified when visible is True")
+        if visible:
+            handles, _ = ax.get_legend_handles_labels()
+            markers = [handle.get_marker() for handle in handles]
+            assert markers == expected_markers
+        else:
+            assert ax.get_legend() is None
 
-    alpha_upper = norm(suf) / Delta
+    def _check_data(self, xp, rs):
+        """
+        Check each axes has identical lines
 
-    if full_rank:
-        phi, phi_prime = phi_and_derivative(0.0, suf, s, Delta)
-        alpha_lower = -phi / phi_prime
-    else:
-        alpha_lower = 0.0
+        Parameters
+        ----------
+        xp : matplotlib Axes object
+        rs : matplotlib Axes object
+        """
+        xp_lines = xp.get_lines()
+        rs_lines = rs.get_lines()
 
-    if initial_alpha is None or not full_rank and initial_alpha == 0:
-        alpha = max(0.001 * alpha_upper, (alpha_lower * alpha_upper)**0.5)
-    else:
-        alpha = initial_alpha
+        assert len(xp_lines) == len(rs_lines)
+        for xpl, rsl in zip(xp_lines, rs_lines):
+            xpdata = xpl.get_xydata()
+            rsdata = rsl.get_xydata()
+            tm.assert_almost_equal(xpdata, rsdata)
 
-    for it in range(max_iter):
-        if alpha < alpha_lower or alpha > alpha_upper:
-            alpha = max(0.001 * alpha_upper, (alpha_lower * alpha_upper)**0.5)
+        tm.close()
 
-        phi, phi_prime = phi_and_derivative(alpha, suf, s, Delta)
+    def _check_visible(self, collections, visible=True):
+        """
+        Check each artist is visible or not
 
-        if phi < 0:
-            alpha_upper = alpha
+        Parameters
+        ----------
+        collections : matplotlib Artist or its list-like
+            target Artist or its list or collection
+        visible : bool
+            expected visibility
+        """
+        from matplotlib.collections import Collection
 
-        ratio = phi / phi_prime
-        alpha_lower = max(alpha_lower, alpha - ratio)
-        alpha -= (phi + Delta) * ratio / Delta
+        if not isinstance(collections, Collection) and not is_list_like(collections):
+            collections = [collections]
 
-        if np.abs(phi) < rtol * Delta:
-            break
+        for patch in collections:
+            assert patch.get_visible() == visible
 
-    p = -V.dot(suf / (s**2 + alpha))
+    def _check_patches_all_filled(
+        self, axes: Axes | Sequence[Axes], filled: bool = True
+    ) -> None:
+        """
+        Check for each artist whether it is filled or not
 
-    # Make the norm of p equal to Delta, p is changed only slightly during
-    # this. It is done to prevent p lie outside the trust region (which can
-    # cause problems later).
-    p *= Delta / norm(p)
+        Parameters
+        ----------
+        axes : matplotlib Axes object, or its list-like
+        filled : bool
+            expected filling
+        """
 
-    return p, alpha, it + 1
+        axes = self._flatten_visible(axes)
+        for ax in axes:
+            for patch in ax.patches:
+                assert patch.fill == filled
+
+    def _get_colors_mapped(self, series, colors):
+        unique = series.unique()
+        # unique and colors length can be differed
+        # depending on slice value
+        mapped = dict(zip(unique, colors))
+        return [mapped[v] for v in series.values]
+
+    def _check_colors(
+        self, collections, linecolors=None, facecolors=None, mapping=None
+    ):
+        """
+        Check each artist has expected line colors and face colors
+
+        Parameters
+        ----------
+        collections : list-like
+            list or collection of target artist
+        linecolors : list-like which has the same length as collections
+            list of expected line colors
+        facecolors : list-like which has the same length as collections
+            list of expected face colors
+        mapping : Series
+            Series used for color grouping key
+            used for andrew_curves, parallel_coordinates, radviz test
+        """
+        from matplotlib.collections import (
+            Collection,
+            LineCollection,
+            PolyCollection,
+        )
+        from matplotlib.lines import Line2D
+
+        conv = self.colorconverter
+        if linecolors is not None:
+            if mapping is not None:
+                linecolors = self._get_colors_mapped(mapping, linecolors)
+                linecolors = linecolors[: len(collections)]
+
+            assert len(collections) == len(linecolors)
+            for patch, color in zip(collections, linecolors):
+                if isinstance(patch, Line2D):
+                    result = patch.get_color()
+                    # Line2D may contains string color expression
+                    result = conv.to_rgba(result)
+                elif isinstance(patch, (PolyCollection, LineCollection)):
+                    result = tuple(patch.get_edgecolor()[0])
+                else:
+                    result = patch.get_edgecolor()
+
+                expected = conv.to_rgba(color)
+                assert result == expected
+
+        if facecolors is not None:
+            if mapping is not None:
+                facecolors = self._get_colors_mapped(mapping, facecolors)
+                facecolors = facecolors[: len(collections)]
+
+            assert len(collections) == len(facecolors)
+            for patch, color in zip(collections, facecolors):
+                if isinstance(patch, Collection):
+                    # returned as list of np.array
+                    result = patch.get_facecolor()[0]
+                else:
+                    result = patch.get_facecolor()
+
+                if isinstance(result, np.ndarray):
+                    result = tuple(result)
+
+                expected = conv.to_rgba(color)
+                assert result == expected
+
+    def _check_text_labels(self, texts, expected):
+        """
+        Check each text has expected labels
+
+        Parameters
+        ----------
+        texts : matplotlib Text object, or its list-like
+            target text, or its list
+        expected : str or list-like which has the same length as texts
+            expected text label, or its list
+        """
+        if not is_list_like(texts):
+            assert texts.get_text() == expected
+        else:
+            labels = [t.get_text() for t in texts]
+            assert len(labels) == len(expected)
+            for label, e in zip(labels, expected):
+                assert label == e
+
+    def _check_ticks_props(
+        self, axes, xlabelsize=None, xrot=None, ylabelsize=None, yrot=None
+    ):
+        """
+        Check each axes has expected tick properties
+
+        Parameters
+        ----------
+        axes : matplotlib Axes object, or its list-like
+        xlabelsize : number
+            expected xticks font size
+        xrot : number
+            expected xticks rotation
+        ylabelsize : number
+            expected yticks font size
+        yrot : number
+            expected yticks rotation
+        """
+        from matplotlib.ticker import NullFormatter
+
+        axes = self._flatten_visible(axes)
+        for ax in axes:
+            if xlabelsize is not None or xrot is not None:
+                if isinstance(ax.xaxis.get_minor_formatter(), NullFormatter):
+                    # If minor ticks has NullFormatter, rot / fontsize are not
+                    # retained
+                    labels = ax.get_xticklabels()
+                else:
+                    labels = ax.get_xticklabels() + ax.get_xticklabels(minor=True)
+
+                for label in labels:
+                    if xlabelsize is not None:
+                        tm.assert_almost_equal(label.get_fontsize(), xlabelsize)
+                    if xrot is not None:
+                        tm.assert_almost_equal(label.get_rotation(), xrot)
+
+            if ylabelsize is not None or yrot is not None:
+                if isinstance(ax.yaxis.get_minor_formatter(), NullFormatter):
+                    labels = ax.get_yticklabels()
+                else:
+                    labels = ax.get_yticklabels() + ax.get_yticklabels(minor=True)
+
+                for label in labels:
+                    if ylabelsize is not None:
+                        tm.assert_almost_equal(label.get_fontsize(), ylabelsize)
+                    if yrot is not None:
+                        tm.assert_almost_equal(label.get_rotation(), yrot)
+
+    def _check_ax_scales(self, axes, xaxis="linear", yaxis="linear"):
+        """
+        Check each axes has expected scales
+
+        Parameters
+        ----------
+        axes : matplotlib Axes object, or its list-like
+        xaxis : {'linear', 'log'}
+            expected xaxis scale
+        yaxis : {'linear', 'log'}
+            expected yaxis scale
+        """
+        axes = self._flatten_visible(axes)
+        for ax in axes:
+            assert ax.xaxis.get_scale() == xaxis
+            assert ax.yaxis.get_scale() == yaxis
+
+    def _check_axes_shape(self, axes, axes_num=None, layout=None, figsize=None):
+        """
+        Check expected number of axes is drawn in expected layout
+
+        Parameters
+        ----------
+        axes : matplotlib Axes object, or its list-like
+        axes_num : number
+            expected number of axes. Unnecessary axes should be set to
+            invisible.
+        layout : tuple
+            expected layout, (expected number of rows , columns)
+        figsize : tuple
+            expected figsize. default is matplotlib default
+        """
+        from pandas.plotting._matplotlib.tools import flatten_axes
+
+        if figsize is None:
+            figsize = (6.4, 4.8)
+        visible_axes = self._flatten_visible(axes)
+
+        if axes_num is not None:
+            assert len(visible_axes) == axes_num
+            for ax in visible_axes:
+                # check something drawn on visible axes
+                assert len(ax.get_children()) > 0
+
+        if layout is not None:
+            result = self._get_axes_layout(flatten_axes(axes))
+            assert result == layout
+
+        tm.assert_numpy_array_equal(
+            visible_axes[0].figure.get_size_inches(),
+            np.array(figsize, dtype=np.float64),
+        )
+
+    def _get_axes_layout(self, axes):
+        x_set = set()
+        y_set = set()
+        for ax in axes:
+            # check axes coordinates to estimate layout
+            points = ax.get_position().get_points()
+            x_set.add(points[0][0])
+            y_set.add(points[0][1])
+        return (len(y_set), len(x_set))
+
+    def _flatten_visible(self, axes):
+        """
+        Flatten axes, and filter only visible
+
+        Parameters
+        ----------
+        axes : matplotlib Axes object, or its list-like
+
+        """
+        from pandas.plotting._matplotlib.tools import flatten_axes
+
+        axes = flatten_axes(axes)
+        axes = [ax for ax in axes if ax.get_visible()]
+        return axes
+
+    def _check_has_errorbars(self, axes, xerr=0, yerr=0):
+        """
+        Check axes has expected number of errorbars
+
+        Parameters
+        ----------
+        axes : matplotlib Axes object, or its list-like
+        xerr : number
+            expected number of x errorbar
+        yerr : number
+            expected number of y errorbar
+        """
+        axes = self._flatten_visible(axes)
+        for ax in axes:
+            containers = ax.containers
+            xerr_count = 0
+            yerr_count = 0
+            for c in containers:
+                has_xerr = getattr(c, "has_xerr", False)
+                has_yerr = getattr(c, "has_yerr", False)
+                if has_xerr:
+                    xerr_count += 1
+                if has_yerr:
+                    yerr_count += 1
+            assert xerr == xerr_count
+            assert yerr == yerr_count
+
+    def _check_box_return_type(
+        self, returned, return_type, expected_keys=None, check_ax_title=True
+    ):
+        """
+        Check box returned type is correct
+
+        Parameters
+        ----------
+        returned : object to be tested, returned from boxplot
+        return_type : str
+            return_type passed to boxplot
+        expected_keys : list-like, optional
+            group labels in subplot case. If not passed,
+            the function checks assuming boxplot uses single ax
+        check_ax_title : bool
+            Whether to check the ax.title is the same as expected_key
+            Intended to be checked by calling from ``boxplot``.
+            Normal ``plot`` doesn't attach ``ax.title``, it must be disabled.
+        """
+        from matplotlib.axes import Axes
+
+        types = {"dict": dict, "axes": Axes, "both": tuple}
+        if expected_keys is None:
+            # should be fixed when the returning default is changed
+            if return_type is None:
+                return_type = "dict"
+
+            assert isinstance(returned, types[return_type])
+            if return_type == "both":
+                assert isinstance(returned.ax, Axes)
+                assert isinstance(returned.lines, dict)
+        else:
+            # should be fixed when the returning default is changed
+            if return_type is None:
+                for r in self._flatten_visible(returned):
+                    assert isinstance(r, Axes)
+                return
+
+            assert isinstance(returned, Series)
+
+            assert sorted(returned.keys()) == sorted(expected_keys)
+            for key, value in returned.items():
+                assert isinstance(value, types[return_type])
+                # check returned dict has correct mapping
+                if return_type == "axes":
+                    if check_ax_title:
+                        assert value.get_title() == key
+                elif return_type == "both":
+                    if check_ax_title:
+                        assert value.ax.get_title() == key
+                    assert isinstance(value.ax, Axes)
+                    assert isinstance(value.lines, dict)
+                elif return_type == "dict":
+                    line = value["medians"][0]
+                    axes = line.axes
+                    if check_ax_title:
+                        assert axes.get_title() == key
+                else:
+                    raise AssertionError
+
+    def _check_grid_settings(self, obj, kinds, kws={}):
+        # Make sure plot defaults to rcParams['axes.grid'] setting, GH 9792
+
+        import matplotlib as mpl
+
+        def is_grid_on():
+            xticks = self.plt.gca().xaxis.get_major_ticks()
+            yticks = self.plt.gca().yaxis.get_major_ticks()
+            xoff = all(not g.gridline.get_visible() for g in xticks)
+            yoff = all(not g.gridline.get_visible() for g in yticks)
+
+            return not (xoff and yoff)
+
+        spndx = 1
+        for kind in kinds:
+            self.plt.subplot(1, 4 * len(kinds), spndx)
+            spndx += 1
+            mpl.rc("axes", grid=False)
+            obj.plot(kind=kind, **kws)
+            assert not is_grid_on()
+            self.plt.clf()
+
+            self.plt.subplot(1, 4 * len(kinds), spndx)
+            spndx += 1
+            mpl.rc("axes", grid=True)
+            obj.plot(kind=kind, grid=False, **kws)
+            assert not is_grid_on()
+            self.plt.clf()
+
+            if kind not in ["pie", "hexbin", "scatter"]:
+                self.plt.subplot(1, 4 * len(kinds), spndx)
+                spndx += 1
+                mpl.rc("axes", grid=True)
+                obj.plot(kind=kind, **kws)
+                assert is_grid_on()
+                self.plt.clf()
+
+                self.plt.subplot(1, 4 * len(kinds), spndx)
+                spndx += 1
+                mpl.rc("axes", grid=False)
+                obj.plot(kind=kind, grid=True, **kws)
+                assert is_grid_on()
+                self.plt.clf()
+
+    def _unpack_cycler(self, rcParams, field="color"):
+        """
+        Auxiliary function for correctly unpacking cycler after MPL >= 1.5
+        """
+        return [v[field] for v in rcParams["axes.prop_cycle"]]
+
+    def get_x_axis(self, ax):
+        return ax._shared_axes["x"]
+
+    def get_y_axis(self, ax):
+        return ax._shared_axes["y"]
 
 
-def solve_trust_region_2d(B, g, Delta):
-    """Solve a general trust-region problem in 2 dimensions.
-
-    The problem is reformulated as a 4th order algebraic equation,
-    the solution of which is found by numpy.roots.
+def _check_plot_works(f, default_axes=False, **kwargs):
+    """
+    Create plot and ensure that plot return object is valid.
 
     Parameters
     ----------
-    B : ndarray, shape (2, 2)
-        Symmetric matrix, defines a quadratic term of the function.
-    g : ndarray, shape (2,)
-        Defines a linear term of the function.
-    Delta : float
-        Radius of a trust region.
+    f : func
+        Plotting function.
+    default_axes : bool, optional
+        If False (default):
+            - If `ax` not in `kwargs`, then create subplot(211) and plot there
+            - Create new subplot(212) and plot there as well
+            - Mind special corner case for bootstrap_plot (see `_gen_two_subplots`)
+        If True:
+            - Simply run plotting function with kwargs provided
+            - All required axes instances will be created automatically
+            - It is recommended to use it when the plotting function
+            creates multiple axes itself. It helps avoid warnings like
+            'UserWarning: To output multiple subplots,
+            the figure containing the passed axes is being cleared'
+    **kwargs
+        Keyword arguments passed to the plotting function.
 
     Returns
     -------
-    p : ndarray, shape (2,)
-        Found solution.
-    newton_step : bool
-        Whether the returned solution is the Newton step which lies within
-        the trust region.
+    Plot object returned by the last plotting.
     """
+    import matplotlib.pyplot as plt
+
+    if default_axes:
+        gen_plots = _gen_default_plot
+    else:
+        gen_plots = _gen_two_subplots
+
+    ret = None
     try:
-        R, lower = cho_factor(B)
-        p = -cho_solve((R, lower), g)
-        if np.dot(p, p) <= Delta**2:
-            return p, True
-    except LinAlgError:
-        pass
+        fig = kwargs.get("figure", plt.gcf())
+        plt.clf()
 
-    a = B[0, 0] * Delta**2
-    b = B[0, 1] * Delta**2
-    c = B[1, 1] * Delta**2
+        for ret in gen_plots(f, fig, **kwargs):
+            tm.assert_is_valid_plot_return_object(ret)
 
-    d = g[0] * Delta
-    f = g[1] * Delta
+        with tm.ensure_clean(return_filelike=True) as path:
+            plt.savefig(path)
 
-    coeffs = np.array(
-        [-b + d, 2 * (a - c + f), 6 * b, 2 * (-a + c + f), -b - d])
-    t = np.roots(coeffs)  # Can handle leading zeros.
-    t = np.real(t[np.isreal(t)])
+    finally:
+        tm.close(fig)
 
-    p = Delta * np.vstack((2 * t / (1 + t**2), (1 - t**2) / (1 + t**2)))
-    value = 0.5 * np.sum(p * B.dot(p), axis=0) + np.dot(g, p)
-    i = np.argmin(value)
-    p = p[:, i]
-
-    return p, False
+    return ret
 
 
-def update_tr_radius(Delta, actual_reduction, predicted_reduction,
-                     step_norm, bound_hit):
-    """Update the radius of a trust region based on the cost reduction.
-
-    Returns
-    -------
-    Delta : float
-        New radius.
-    ratio : float
-        Ratio between actual and predicted reductions.
+def _gen_default_plot(f, fig, **kwargs):
     """
-    if predicted_reduction > 0:
-        ratio = actual_reduction / predicted_reduction
-    elif predicted_reduction == actual_reduction == 0:
-        ratio = 1
-    else:
-        ratio = 0
-
-    if ratio < 0.25:
-        Delta = 0.25 * step_norm
-    elif ratio > 0.75 and bound_hit:
-        Delta *= 2.0
-
-    return Delta, ratio
-
-
-# Construction and minimization of quadratic functions.
-
-
-def build_quadratic_1d(J, g, s, diag=None, s0=None):
-    """Parameterize a multivariate quadratic function along a line.
-
-    The resulting univariate quadratic function is given as follows::
-
-        f(t) = 0.5 * (s0 + s*t).T * (J.T*J + diag) * (s0 + s*t) +
-               g.T * (s0 + s*t)
-
-    Parameters
-    ----------
-    J : ndarray, sparse matrix or LinearOperator shape (m, n)
-        Jacobian matrix, affects the quadratic term.
-    g : ndarray, shape (n,)
-        Gradient, defines the linear term.
-    s : ndarray, shape (n,)
-        Direction vector of a line.
-    diag : None or ndarray with shape (n,), optional
-        Addition diagonal part, affects the quadratic term.
-        If None, assumed to be 0.
-    s0 : None or ndarray with shape (n,), optional
-        Initial point. If None, assumed to be 0.
-
-    Returns
-    -------
-    a : float
-        Coefficient for t**2.
-    b : float
-        Coefficient for t.
-    c : float
-        Free term. Returned only if `s0` is provided.
+    Create plot in a default way.
     """
-    v = J.dot(s)
-    a = np.dot(v, v)
-    if diag is not None:
-        a += np.dot(s * diag, s)
-    a *= 0.5
-
-    b = np.dot(g, s)
-
-    if s0 is not None:
-        u = J.dot(s0)
-        b += np.dot(u, v)
-        c = 0.5 * np.dot(u, u) + np.dot(g, s0)
-        if diag is not None:
-            b += np.dot(s0 * diag, s)
-            c += 0.5 * np.dot(s0 * diag, s0)
-        return a, b, c
-    else:
-        return a, b
+    yield f(**kwargs)
 
 
-def minimize_quadratic_1d(a, b, lb, ub, c=0):
-    """Minimize a 1-D quadratic function subject to bounds.
-
-    The free term `c` is 0 by default. Bounds must be finite.
-
-    Returns
-    -------
-    t : float
-        Minimum point.
-    y : float
-        Minimum value.
+def _gen_two_subplots(f, fig, **kwargs):
     """
-    t = [lb, ub]
-    if a != 0:
-        extremum = -0.5 * b / a
-        if lb < extremum < ub:
-            t.append(extremum)
-    t = np.asarray(t)
-    y = t * (a * t + b) + c
-    min_index = np.argmin(y)
-    return t[min_index], y[min_index]
-
-
-def evaluate_quadratic(J, g, s, diag=None):
-    """Compute values of a quadratic function arising in least squares.
-
-    The function is 0.5 * s.T * (J.T * J + diag) * s + g.T * s.
-
-    Parameters
-    ----------
-    J : ndarray, sparse matrix or LinearOperator, shape (m, n)
-        Jacobian matrix, affects the quadratic term.
-    g : ndarray, shape (n,)
-        Gradient, defines the linear term.
-    s : ndarray, shape (k, n) or (n,)
-        Array containing steps as rows.
-    diag : ndarray, shape (n,), optional
-        Addition diagonal part, affects the quadratic term.
-        If None, assumed to be 0.
-
-    Returns
-    -------
-    values : ndarray with shape (k,) or float
-        Values of the function. If `s` was 2-D, then ndarray is
-        returned, otherwise, float is returned.
+    Create plot on two subplots forcefully created.
     """
-    if s.ndim == 1:
-        Js = J.dot(s)
-        q = np.dot(Js, Js)
-        if diag is not None:
-            q += np.dot(s * diag, s)
+    if "ax" not in kwargs:
+        fig.add_subplot(211)
+    yield f(**kwargs)
+
+    if f is pd.plotting.bootstrap_plot:
+        assert "ax" not in kwargs
     else:
-        Js = J.dot(s.T)
-        q = np.sum(Js**2, axis=0)
-        if diag is not None:
-            q += np.sum(diag * s**2, axis=1)
-
-    l = np.dot(s, g)
-
-    return 0.5 * q + l
-
-
-# Utility functions to work with bound constraints.
-
-
-def in_bounds(x, lb, ub):
-    """Check if a point lies within bounds."""
-    return np.all((x >= lb) & (x <= ub))
-
-
-def step_size_to_bound(x, s, lb, ub):
-    """Compute a min_step size required to reach a bound.
-
-    The function computes a positive scalar t, such that x + s * t is on
-    the bound.
-
-    Returns
-    -------
-    step : float
-        Computed step. Non-negative value.
-    hits : ndarray of int with shape of x
-        Each element indicates whether a corresponding variable reaches the
-        bound:
-
-             *  0 - the bound was not hit.
-             * -1 - the lower bound was hit.
-             *  1 - the upper bound was hit.
-    """
-    non_zero = np.nonzero(s)
-    s_non_zero = s[non_zero]
-    steps = np.empty_like(x)
-    steps.fill(np.inf)
-    with np.errstate(over='ignore'):
-        steps[non_zero] = np.maximum((lb - x)[non_zero] / s_non_zero,
-                                     (ub - x)[non_zero] / s_non_zero)
-    min_step = np.min(steps)
-    return min_step, np.equal(steps, min_step) * np.sign(s).astype(int)
-
-
-def find_active_constraints(x, lb, ub, rtol=1e-10):
-    """Determine which constraints are active in a given point.
-
-    The threshold is computed using `rtol` and the absolute value of the
-    closest bound.
-
-    Returns
-    -------
-    active : ndarray of int with shape of x
-        Each component shows whether the corresponding constraint is active:
-
-             *  0 - a constraint is not active.
-             * -1 - a lower bound is active.
-             *  1 - a upper bound is active.
-    """
-    active = np.zeros_like(x, dtype=int)
-
-    if rtol == 0:
-        active[x <= lb] = -1
-        active[x >= ub] = 1
-        return active
-
-    lower_dist = x - lb
-    upper_dist = ub - x
-
-    lower_threshold = rtol * np.maximum(1, np.abs(lb))
-    upper_threshold = rtol * np.maximum(1, np.abs(ub))
-
-    lower_active = (np.isfinite(lb) &
-                    (lower_dist <= np.minimum(upper_dist, lower_threshold)))
-    active[lower_active] = -1
-
-    upper_active = (np.isfinite(ub) &
-                    (upper_dist <= np.minimum(lower_dist, upper_threshold)))
-    active[upper_active] = 1
-
-    return active
-
-
-def make_strictly_feasible(x, lb, ub, rstep=1e-10):
-    """Shift a point to the interior of a feasible region.
-
-    Each element of the returned vector is at least at a relative distance
-    `rstep` from the closest bound. If ``rstep=0`` then `np.nextafter` is used.
-    """
-    x_new = x.copy()
-
-    active = find_active_constraints(x, lb, ub, rstep)
-    lower_mask = np.equal(active, -1)
-    upper_mask = np.equal(active, 1)
-
-    if rstep == 0:
-        x_new[lower_mask] = np.nextafter(lb[lower_mask], ub[lower_mask])
-        x_new[upper_mask] = np.nextafter(ub[upper_mask], lb[upper_mask])
-    else:
-        x_new[lower_mask] = (lb[lower_mask] +
-                             rstep * np.maximum(1, np.abs(lb[lower_mask])))
-        x_new[upper_mask] = (ub[upper_mask] -
-                             rstep * np.maximum(1, np.abs(ub[upper_mask])))
-
-    tight_bounds = (x_new < lb) | (x_new > ub)
-    x_new[tight_bounds] = 0.5 * (lb[tight_bounds] + ub[tight_bounds])
-
-    return x_new
-
-
-def CL_scaling_vector(x, g, lb, ub):
-    """Compute Coleman-Li scaling vector and its derivatives.
-
-    Components of a vector v are defined as follows::
-
-               | ub[i] - x[i], if g[i] < 0 and ub[i] < np.inf
-        v[i] = | x[i] - lb[i], if g[i] > 0 and lb[i] > -np.inf
-               | 1,           otherwise
-
-    According to this definition v[i] >= 0 for all i. It differs from the
-    definition in paper [1]_ (eq. (2.2)), where the absolute value of v is
-    used. Both definitions are equivalent down the line.
-    Derivatives of v with respect to x take value 1, -1 or 0 depending on a
-    case.
-
-    Returns
-    -------
-    v : ndarray with shape of x
-        Scaling vector.
-    dv : ndarray with shape of x
-        Derivatives of v[i] with respect to x[i], diagonal elements of v's
-        Jacobian.
-
-    References
-    ----------
-    .. [1] M.A. Branch, T.F. Coleman, and Y. Li, "A Subspace, Interior,
-           and Conjugate Gradient Method for Large-Scale Bound-Constrained
-           Minimization Problems," SIAM Journal on Scientific Computing,
-           Vol. 21, Number 1, pp 1-23, 1999.
-    """
-    v = np.ones_like(x)
-    dv = np.zeros_like(x)
-
-    mask = (g < 0) & np.isfinite(ub)
-    v[mask] = ub[mask] - x[mask]
-    dv[mask] = -1
-
-    mask = (g > 0) & np.isfinite(lb)
-    v[mask] = x[mask] - lb[mask]
-    dv[mask] = 1
-
-    return v, dv
-
-
-def reflective_transformation(y, lb, ub):
-    """Compute reflective transformation and its gradient."""
-    if in_bounds(y, lb, ub):
-        return y, np.ones_like(y)
-
-    lb_finite = np.isfinite(lb)
-    ub_finite = np.isfinite(ub)
-
-    x = y.copy()
-    g_negative = np.zeros_like(y, dtype=bool)
-
-    mask = lb_finite & ~ub_finite
-    x[mask] = np.maximum(y[mask], 2 * lb[mask] - y[mask])
-    g_negative[mask] = y[mask] < lb[mask]
-
-    mask = ~lb_finite & ub_finite
-    x[mask] = np.minimum(y[mask], 2 * ub[mask] - y[mask])
-    g_negative[mask] = y[mask] > ub[mask]
-
-    mask = lb_finite & ub_finite
-    d = ub - lb
-    t = np.remainder(y[mask] - lb[mask], 2 * d[mask])
-    x[mask] = lb[mask] + np.minimum(t, 2 * d[mask] - t)
-    g_negative[mask] = t > d[mask]
-
-    g = np.ones_like(y)
-    g[g_negative] = -1
-
-    return x, g
-
-
-# Functions to display algorithm's progress.
-
-
-def print_header_nonlinear():
-    print("{:^15}{:^15}{:^15}{:^15}{:^15}{:^15}"
-          .format("Iteration", "Total nfev", "Cost", "Cost reduction",
-                  "Step norm", "Optimality"))
-
-
-def print_iteration_nonlinear(iteration, nfev, cost, cost_reduction,
-                              step_norm, optimality):
-    if cost_reduction is None:
-        cost_reduction = " " * 15
-    else:
-        cost_reduction = f"{cost_reduction:^15.2e}"
-
-    if step_norm is None:
-        step_norm = " " * 15
-    else:
-        step_norm = f"{step_norm:^15.2e}"
-
-    print("{:^15}{:^15}{:^15.4e}{}{}{:^15.2e}"
-          .format(iteration, nfev, cost, cost_reduction,
-                  step_norm, optimality))
-
-
-def print_header_linear():
-    print("{:^15}{:^15}{:^15}{:^15}{:^15}"
-          .format("Iteration", "Cost", "Cost reduction", "Step norm",
-                  "Optimality"))
-
-
-def print_iteration_linear(iteration, cost, cost_reduction, step_norm,
-                           optimality):
-    if cost_reduction is None:
-        cost_reduction = " " * 15
-    else:
-        cost_reduction = f"{cost_reduction:^15.2e}"
-
-    if step_norm is None:
-        step_norm = " " * 15
-    else:
-        step_norm = f"{step_norm:^15.2e}"
-
-    print("{:^15}{:^15.4e}{}{}{:^15.2e}".format(
-        iteration, cost, cost_reduction, step_norm, optimality))
-
-
-# Simple helper functions.
-
-
-def compute_grad(J, f):
-    """Compute gradient of the least-squares cost function."""
-    if isinstance(J, LinearOperator):
-        return J.rmatvec(f)
-    else:
-        return J.T.dot(f)
-
-
-def compute_jac_scale(J, scale_inv_old=None):
-    """Compute variables scale based on the Jacobian matrix."""
-    if issparse(J):
-        scale_inv = np.asarray(J.power(2).sum(axis=0)).ravel()**0.5
-    else:
-        scale_inv = np.sum(J**2, axis=0)**0.5
-
-    if scale_inv_old is None:
-        scale_inv[scale_inv == 0] = 1
-    else:
-        scale_inv = np.maximum(scale_inv, scale_inv_old)
-
-    return 1 / scale_inv, scale_inv
-
-
-def left_multiplied_operator(J, d):
-    """Return diag(d) J as LinearOperator."""
-    J = aslinearoperator(J)
-
-    def matvec(x):
-        return d * J.matvec(x)
-
-    def matmat(X):
-        return d[:, np.newaxis] * J.matmat(X)
-
-    def rmatvec(x):
-        return J.rmatvec(x.ravel() * d)
-
-    return LinearOperator(J.shape, matvec=matvec, matmat=matmat,
-                          rmatvec=rmatvec)
-
-
-def right_multiplied_operator(J, d):
-    """Return J diag(d) as LinearOperator."""
-    J = aslinearoperator(J)
-
-    def matvec(x):
-        return J.matvec(np.ravel(x) * d)
-
-    def matmat(X):
-        return J.matmat(X * d[:, np.newaxis])
-
-    def rmatvec(x):
-        return d * J.rmatvec(x)
-
-    return LinearOperator(J.shape, matvec=matvec, matmat=matmat,
-                          rmatvec=rmatvec)
-
-
-def regularized_lsq_operator(J, diag):
-    """Return a matrix arising in regularized least squares as LinearOperator.
-
-    The matrix is
-        [ J ]
-        [ D ]
-    where D is diagonal matrix with elements from `diag`.
-    """
-    J = aslinearoperator(J)
-    m, n = J.shape
-
-    def matvec(x):
-        return np.hstack((J.matvec(x), diag * x))
-
-    def rmatvec(x):
-        x1 = x[:m]
-        x2 = x[m:]
-        return J.rmatvec(x1) + diag * x2
-
-    return LinearOperator((m + n, n), matvec=matvec, rmatvec=rmatvec)
-
-
-def right_multiply(J, d, copy=True):
-    """Compute J diag(d).
-
-    If `copy` is False, `J` is modified in place (unless being LinearOperator).
-    """
-    if copy and not isinstance(J, LinearOperator):
-        J = J.copy()
-
-    if issparse(J):
-        J.data *= d.take(J.indices, mode='clip')  # scikit-learn recipe.
-    elif isinstance(J, LinearOperator):
-        J = right_multiplied_operator(J, d)
-    else:
-        J *= d
-
-    return J
-
-
-def left_multiply(J, d, copy=True):
-    """Compute diag(d) J.
-
-    If `copy` is False, `J` is modified in place (unless being LinearOperator).
-    """
-    if copy and not isinstance(J, LinearOperator):
-        J = J.copy()
-
-    if issparse(J):
-        J.data *= np.repeat(d, np.diff(J.indptr))  # scikit-learn recipe.
-    elif isinstance(J, LinearOperator):
-        J = left_multiplied_operator(J, d)
-    else:
-        J *= d[:, np.newaxis]
-
-    return J
-
-
-def check_termination(dF, F, dx_norm, x_norm, ratio, ftol, xtol):
-    """Check termination condition for nonlinear least squares."""
-    ftol_satisfied = dF < ftol * F and ratio > 0.25
-    xtol_satisfied = dx_norm < xtol * (xtol + x_norm)
-
-    if ftol_satisfied and xtol_satisfied:
-        return 4
-    elif ftol_satisfied:
-        return 2
-    elif xtol_satisfied:
-        return 3
-    else:
-        return None
-
-
-def scale_for_robust_loss_function(J, f, rho):
-    """Scale Jacobian and residuals for a robust loss function.
-
-    Arrays are modified in place.
-    """
-    J_scale = rho[1] + 2 * rho[2] * f**2
-    J_scale[J_scale < EPS] = EPS
-    J_scale **= 0.5
-
-    f *= rho[1] / J_scale
-
-    return left_multiply(J, J_scale, copy=False), f
+        kwargs["ax"] = fig.add_subplot(212)
+    yield f(**kwargs)

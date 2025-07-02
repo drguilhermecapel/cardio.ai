@@ -1,142 +1,46 @@
-# CardioAI Pro v2.0.0 - Dependências Completas
-# TODOS os 7 arquivos RAR foram integrados harmonicamente
-
-# Framework principal
-fastapi>=0.104.1
-uvicorn[standard]>=0.24.0
-python-multipart>=0.0.6
+# Dependências para a plataforma de treinamento de IA
+torch>=1.9.0
+torchvision>=0.10.0
+torchaudio>=0.9.0
+timm>=0.6.0
+transformers>=4.20.0
 
 # Processamento de dados
-numpy>=1.24.0
-scipy>=1.9.3
-pandas>=2.0.0
-
-# Machine Learning
-scikit-learn>=1.3.0
-torch>=2.0.0
-tensorflow>=2.13.0
-transformers>=4.30.0
-
-# Processamento de sinais
-wfdb>=4.1.0
-neurokit2>=0.2.0
-heartpy>=1.2.7
-
-# Banco de dados
-sqlalchemy>=2.0.0
-alembic>=1.11.0
-psycopg2-binary>=2.9.0
+numpy>=1.21.0
+pandas>=1.3.0
+scipy>=1.7.0
+scikit-learn>=1.0.0
+wfdb>=3.4.0
 
 # Visualização
-matplotlib>=3.7.0
-plotly>=5.15.0
-seaborn>=0.12.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+plotly>=5.0.0
+
+# API e web
+fastapi>=0.70.0
+uvicorn>=0.15.0
+pydantic>=1.8.0
 
 # Utilitários
-pydantic>=2.0.0
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-python-dotenv>=1.0.0
-aiofiles>=23.0.0
-
-# Testes
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
-httpx>=0.24.0
-
-# Monitoramento
-structlog>=23.0.0
-sentry-sdk[fastapi]>=1.28.0
-
-# Documentação
-mkdocs>=1.5.0
-mkdocs-material>=9.0.0
-
-# Desenvolvimento
-black>=23.0.0
-isort>=5.12.0
-flake8>=6.0.0
-mypy>=1.4.0
-
-# Processamento de imagens
-Pillow>=10.0.0
-opencv-python>=4.8.0
-
-# Formatos de dados
-h5py>=3.9.0
-pyedflib>=0.1.30
-xmltodict>=0.13.0
-
-# Segurança
-cryptography>=41.0.0
-bcrypt>=4.0.0
-
-# Comunicação
-requests>=2.31.0
-aiohttp>=3.8.0
-
-# Configuração
+tqdm>=4.62.0
 pyyaml>=6.0
-toml>=0.10.2
+tensorboard>=2.7.0
+wandb>=0.12.0
 
-# Processamento paralelo
-joblib>=1.3.0
-multiprocessing-logging>=0.3.4
+# Processamento de imagens/sinais
+opencv-python>=4.5.0
+Pillow>=8.3.0
 
-# Validação
-marshmallow>=3.20.0
-cerberus>=1.3.4
+# Formato de dados
+h5py>=3.6.0
+pyarrow>=6.0.0
 
-# Métricas
-prometheus-client>=0.17.0
-psutil>=5.9.0
+# Exportação de modelos
+onnx>=1.10.0
+onnxruntime>=1.9.0
 
-# Logging avançado
-loguru>=0.7.0
-rich>=13.0.0
 
-# Análise de dados médicos
-pydicom>=2.4.0
-nibabel>=5.1.0
 
-# Processamento de tempo
-arrow>=1.2.3
-pendulum>=2.1.2
-
-# Cache
-redis>=4.6.0
-diskcache>=5.6.0
-
-# Serialização
-orjson>=3.9.0
-msgpack>=1.0.5
-
-# Validação de dados
-jsonschema>=4.18.0
-voluptuous>=0.13.1
-
-# Utilitários de sistema
-click>=8.1.0
-typer>=0.9.0
-
-# Processamento de texto
-nltk>=3.8.1
-spacy>=3.6.0
-
-# Análise estatística
-statsmodels>=0.14.0
-pingouin>=0.5.3
-
-# Otimização
-optuna>=3.2.0
-hyperopt>=0.2.7
-
-# Deployment
-gunicorn>=21.0.0
-docker>=6.1.0
-
-# Monitoramento de performance
-py-spy>=0.3.14
-memory-profiler>=0.61.0
+pydantic-settings>=2.0.0
 

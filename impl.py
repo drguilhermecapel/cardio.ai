@@ -1,581 +1,902 @@
-# pool/impl.py
-# Copyright (C) 2005-2025 the SQLAlchemy authors and contributors
-# <see AUTHORS file>
-#
-# This module is part of SQLAlchemy and is released under
-# the MIT License: https://www.opensource.org/licenses/mit-license.php
+# mypy: allow-untyped-defs, allow-incomplete-defs, allow-untyped-calls
+# mypy: no-warn-return-any, allow-any-generics
 
-
-"""Pool implementation classes.
-
-"""
 from __future__ import annotations
 
-import threading
-import traceback
-import typing
+import logging
+import re
 from typing import Any
-from typing import cast
+from typing import Callable
+from typing import Dict
+from typing import Iterable
 from typing import List
+from typing import Mapping
+from typing import NamedTuple
 from typing import Optional
+from typing import Sequence
 from typing import Set
+from typing import Tuple
 from typing import Type
 from typing import TYPE_CHECKING
 from typing import Union
-import weakref
 
-from .base import _AsyncConnDialect
-from .base import _ConnectionFairy
-from .base import _ConnectionRecord
-from .base import _CreatorFnType
-from .base import _CreatorWRecFnType
-from .base import ConnectionPoolEntry
-from .base import Pool
-from .base import PoolProxiedConnection
-from .. import exc
+from sqlalchemy import cast
+from sqlalchemy import Column
+from sqlalchemy import MetaData
+from sqlalchemy import PrimaryKeyConstraint
+from sqlalchemy import schema
+from sqlalchemy import String
+from sqlalchemy import Table
+from sqlalchemy import text
+
+from . import _autogen
+from . import base
+from ._autogen import _constraint_sig as _constraint_sig
+from ._autogen import ComparisonResult as ComparisonResult
 from .. import util
-from ..util import chop_traceback
-from ..util import queue as sqla_queue
-from ..util.typing import Literal
+from ..util import sqla_compat
 
-if typing.TYPE_CHECKING:
-    from ..engine.interfaces import DBAPIConnection
+if TYPE_CHECKING:
+    from typing import Literal
+    from typing import TextIO
+
+    from sqlalchemy.engine import Connection
+    from sqlalchemy.engine import Dialect
+    from sqlalchemy.engine.cursor import CursorResult
+    from sqlalchemy.engine.reflection import Inspector
+    from sqlalchemy.sql import ClauseElement
+    from sqlalchemy.sql import Executable
+    from sqlalchemy.sql.elements import quoted_name
+    from sqlalchemy.sql.schema import Constraint
+    from sqlalchemy.sql.schema import ForeignKeyConstraint
+    from sqlalchemy.sql.schema import Index
+    from sqlalchemy.sql.schema import UniqueConstraint
+    from sqlalchemy.sql.selectable import TableClause
+    from sqlalchemy.sql.type_api import TypeEngine
+
+    from .base import _ServerDefault
+    from ..autogenerate.api import AutogenContext
+    from ..operations.batch import ApplyBatchImpl
+    from ..operations.batch import BatchOperationsImpl
+
+log = logging.getLogger(__name__)
 
 
-class QueuePool(Pool):
-    """A :class:`_pool.Pool`
-    that imposes a limit on the number of open connections.
+class ImplMeta(type):
+    def __init__(
+        cls,
+        classname: str,
+        bases: Tuple[Type[DefaultImpl]],
+        dict_: Dict[str, Any],
+    ):
+        newtype = type.__init__(cls, classname, bases, dict_)
+        if "__dialect__" in dict_:
+            _impls[dict_["__dialect__"]] = cls  # type: ignore[assignment]
+        return newtype
 
-    :class:`.QueuePool` is the default pooling implementation used for
-    all :class:`_engine.Engine` objects other than SQLite with a ``:memory:``
-    database.
 
-    The :class:`.QueuePool` class **is not compatible** with asyncio and
-    :func:`_asyncio.create_async_engine`.  The
-    :class:`.AsyncAdaptedQueuePool` class is used automatically when
-    using :func:`_asyncio.create_async_engine`, if no other kind of pool
-    is specified.
+_impls: Dict[str, Type[DefaultImpl]] = {}
 
-    .. seealso::
 
-        :class:`.AsyncAdaptedQueuePool`
+class DefaultImpl(metaclass=ImplMeta):
+    """Provide the entrypoint for major migration operations,
+    including database-specific behavioral variances.
+
+    While individual SQL/DDL constructs already provide
+    for database-specific implementations, variances here
+    allow for entirely different sequences of operations
+    to take place for a particular migration, such as
+    SQL Server's special 'IDENTITY INSERT' step for
+    bulk inserts.
 
     """
 
-    _is_asyncio = False  # type: ignore[assignment]
+    __dialect__ = "default"
 
-    _queue_class: Type[sqla_queue.QueueCommon[ConnectionPoolEntry]] = (
-        sqla_queue.Queue
-    )
-
-    _pool: sqla_queue.QueueCommon[ConnectionPoolEntry]
+    transactional_ddl = False
+    command_terminator = ";"
+    type_synonyms: Tuple[Set[str], ...] = ({"NUMERIC", "DECIMAL"},)
+    type_arg_extract: Sequence[str] = ()
+    # These attributes are deprecated in SQLAlchemy via #10247. They need to
+    # be ignored to support older version that did not use dialect kwargs.
+    # They only apply to Oracle and are replaced by oracle_order,
+    # oracle_on_null
+    identity_attrs_ignore: Tuple[str, ...] = ("order", "on_null")
 
     def __init__(
         self,
-        creator: Union[_CreatorFnType, _CreatorWRecFnType],
-        pool_size: int = 5,
-        max_overflow: int = 10,
-        timeout: float = 30.0,
-        use_lifo: bool = False,
+        dialect: Dialect,
+        connection: Optional[Connection],
+        as_sql: bool,
+        transactional_ddl: Optional[bool],
+        output_buffer: Optional[TextIO],
+        context_opts: Dict[str, Any],
+    ) -> None:
+        self.dialect = dialect
+        self.connection = connection
+        self.as_sql = as_sql
+        self.literal_binds = context_opts.get("literal_binds", False)
+
+        self.output_buffer = output_buffer
+        self.memo: dict = {}
+        self.context_opts = context_opts
+        if transactional_ddl is not None:
+            self.transactional_ddl = transactional_ddl
+
+        if self.literal_binds:
+            if not self.as_sql:
+                raise util.CommandError(
+                    "Can't use literal_binds setting without as_sql mode"
+                )
+
+    @classmethod
+    def get_by_dialect(cls, dialect: Dialect) -> Type[DefaultImpl]:
+        return _impls[dialect.name]
+
+    def static_output(self, text: str) -> None:
+        assert self.output_buffer is not None
+        self.output_buffer.write(text + "\n\n")
+        self.output_buffer.flush()
+
+    def version_table_impl(
+        self,
+        *,
+        version_table: str,
+        version_table_schema: Optional[str],
+        version_table_pk: bool,
         **kw: Any,
-    ):
-        r"""
-        Construct a QueuePool.
+    ) -> Table:
+        """Generate a :class:`.Table` object which will be used as the
+        structure for the Alembic version table.
 
-        :param creator: a callable function that returns a DB-API
-          connection object, same as that of :paramref:`_pool.Pool.creator`.
+        Third party dialects may override this hook to provide an alternate
+        structure for this :class:`.Table`; requirements are only that it
+        be named based on the ``version_table`` parameter and contains
+        at least a single string-holding column named ``version_num``.
 
-        :param pool_size: The size of the pool to be maintained,
-          defaults to 5. This is the largest number of connections that
-          will be kept persistently in the pool. Note that the pool
-          begins with no connections; once this number of connections
-          is requested, that number of connections will remain.
-          ``pool_size`` can be set to 0 to indicate no size limit; to
-          disable pooling, use a :class:`~sqlalchemy.pool.NullPool`
-          instead.
+        .. versionadded:: 1.14
 
-        :param max_overflow: The maximum overflow size of the
-          pool. When the number of checked-out connections reaches the
-          size set in pool_size, additional connections will be
-          returned up to this limit. When those additional connections
-          are returned to the pool, they are disconnected and
-          discarded. It follows then that the total number of
-          simultaneous connections the pool will allow is pool_size +
-          `max_overflow`, and the total number of "sleeping"
-          connections the pool will allow is pool_size. `max_overflow`
-          can be set to -1 to indicate no overflow limit; no limit
-          will be placed on the total number of concurrent
-          connections. Defaults to 10.
+        """
+        vt = Table(
+            version_table,
+            MetaData(),
+            Column("version_num", String(32), nullable=False),
+            schema=version_table_schema,
+        )
+        if version_table_pk:
+            vt.append_constraint(
+                PrimaryKeyConstraint(
+                    "version_num", name=f"{version_table}_pkc"
+                )
+            )
 
-        :param timeout: The number of seconds to wait before giving up
-          on returning a connection. Defaults to 30.0. This can be a float
-          but is subject to the limitations of Python time functions which
-          may not be reliable in the tens of milliseconds.
+        return vt
 
-        :param use_lifo: use LIFO (last-in-first-out) when retrieving
-          connections instead of FIFO (first-in-first-out). Using LIFO, a
-          server-side timeout scheme can reduce the number of connections used
-          during non-peak periods of use.   When planning for server-side
-          timeouts, ensure that a recycle or pre-ping strategy is in use to
-          gracefully handle stale connections.
+    def requires_recreate_in_batch(
+        self, batch_op: BatchOperationsImpl
+    ) -> bool:
+        """Return True if the given :class:`.BatchOperationsImpl`
+        would need the table to be recreated and copied in order to
+        proceed.
 
-          .. versionadded:: 1.3
+        Normally, only returns True on SQLite when operations other
+        than add_column are present.
 
-          .. seealso::
+        """
+        return False
 
-            :ref:`pool_use_lifo`
+    def prep_table_for_batch(
+        self, batch_impl: ApplyBatchImpl, table: Table
+    ) -> None:
+        """perform any operations needed on a table before a new
+        one is created to replace it in batch mode.
 
-            :ref:`pool_disconnects`
-
-        :param \**kw: Other keyword arguments including
-          :paramref:`_pool.Pool.recycle`, :paramref:`_pool.Pool.echo`,
-          :paramref:`_pool.Pool.reset_on_return` and others are passed to the
-          :class:`_pool.Pool` constructor.
+        the PG dialect uses this to drop constraints on the table
+        before the new one uses those same names.
 
         """
 
-        Pool.__init__(self, creator, **kw)
-        self._pool = self._queue_class(pool_size, use_lifo=use_lifo)
-        self._overflow = 0 - pool_size
-        self._max_overflow = -1 if pool_size == 0 else max_overflow
-        self._timeout = timeout
-        self._overflow_lock = threading.Lock()
+    @property
+    def bind(self) -> Optional[Connection]:
+        return self.connection
 
-    def _do_return_conn(self, record: ConnectionPoolEntry) -> None:
-        try:
-            self._pool.put(record, False)
-        except sqla_queue.Full:
-            try:
-                record.close()
-            finally:
-                self._dec_overflow()
+    def _exec(
+        self,
+        construct: Union[Executable, str],
+        execution_options: Optional[Mapping[str, Any]] = None,
+        multiparams: Optional[Sequence[Mapping[str, Any]]] = None,
+        params: Mapping[str, Any] = util.immutabledict(),
+    ) -> Optional[CursorResult]:
+        if isinstance(construct, str):
+            construct = text(construct)
+        if self.as_sql:
+            if multiparams is not None or params:
+                raise TypeError("SQL parameters not allowed with as_sql")
 
-    def _do_get(self) -> ConnectionPoolEntry:
-        use_overflow = self._max_overflow > -1
-
-        wait = use_overflow and self._overflow >= self._max_overflow
-        try:
-            return self._pool.get(wait, self._timeout)
-        except sqla_queue.Empty:
-            # don't do things inside of "except Empty", because when we say
-            # we timed out or can't connect and raise, Python 3 tells
-            # people the real error is queue.Empty which it isn't.
-            pass
-        if use_overflow and self._overflow >= self._max_overflow:
-            if not wait:
-                return self._do_get()
+            compile_kw: dict[str, Any]
+            if self.literal_binds and not isinstance(
+                construct, schema.DDLElement
+            ):
+                compile_kw = dict(compile_kwargs={"literal_binds": True})
             else:
-                raise exc.TimeoutError(
-                    "QueuePool limit of size %d overflow %d reached, "
-                    "connection timed out, timeout %0.2f"
-                    % (self.size(), self.overflow(), self._timeout),
-                    code="3o7r",
+                compile_kw = {}
+
+            if TYPE_CHECKING:
+                assert isinstance(construct, ClauseElement)
+            compiled = construct.compile(dialect=self.dialect, **compile_kw)
+            self.static_output(
+                str(compiled).replace("\t", "    ").strip()
+                + self.command_terminator
+            )
+            return None
+        else:
+            conn = self.connection
+            assert conn is not None
+            if execution_options:
+                conn = conn.execution_options(**execution_options)
+
+            if params and multiparams is not None:
+                raise TypeError(
+                    "Can't send params and multiparams at the same time"
                 )
 
-        if self._inc_overflow():
-            try:
-                return self._create_connection()
-            except:
-                with util.safe_reraise():
-                    self._dec_overflow()
-                raise
-        else:
-            return self._do_get()
-
-    def _inc_overflow(self) -> bool:
-        if self._max_overflow == -1:
-            self._overflow += 1
-            return True
-        with self._overflow_lock:
-            if self._overflow < self._max_overflow:
-                self._overflow += 1
-                return True
+            if multiparams:
+                return conn.execute(construct, multiparams)
             else:
-                return False
+                return conn.execute(construct, params)
 
-    def _dec_overflow(self) -> Literal[True]:
-        if self._max_overflow == -1:
-            self._overflow -= 1
-            return True
-        with self._overflow_lock:
-            self._overflow -= 1
-            return True
+    def execute(
+        self,
+        sql: Union[Executable, str],
+        execution_options: Optional[dict[str, Any]] = None,
+    ) -> None:
+        self._exec(sql, execution_options)
 
-    def recreate(self) -> QueuePool:
-        self.logger.info("Pool recreating")
-        return self.__class__(
-            self._creator,
-            pool_size=self._pool.maxsize,
-            max_overflow=self._max_overflow,
-            pre_ping=self._pre_ping,
-            use_lifo=self._pool.use_lifo,
-            timeout=self._timeout,
-            recycle=self._recycle,
-            echo=self.echo,
-            logging_name=self._orig_logging_name,
-            reset_on_return=self._reset_on_return,
-            _dispatch=self.dispatch,
-            dialect=self._dialect,
-        )
+    def alter_column(
+        self,
+        table_name: str,
+        column_name: str,
+        *,
+        nullable: Optional[bool] = None,
+        server_default: Optional[
+            Union[_ServerDefault, Literal[False]]
+        ] = False,
+        name: Optional[str] = None,
+        type_: Optional[TypeEngine] = None,
+        schema: Optional[str] = None,
+        autoincrement: Optional[bool] = None,
+        comment: Optional[Union[str, Literal[False]]] = False,
+        existing_comment: Optional[str] = None,
+        existing_type: Optional[TypeEngine] = None,
+        existing_server_default: Optional[_ServerDefault] = None,
+        existing_nullable: Optional[bool] = None,
+        existing_autoincrement: Optional[bool] = None,
+        **kw: Any,
+    ) -> None:
+        if autoincrement is not None or existing_autoincrement is not None:
+            util.warn(
+                "autoincrement and existing_autoincrement "
+                "only make sense for MySQL",
+                stacklevel=3,
+            )
+        if nullable is not None:
+            self._exec(
+                base.ColumnNullable(
+                    table_name,
+                    column_name,
+                    nullable,
+                    schema=schema,
+                    existing_type=existing_type,
+                    existing_server_default=existing_server_default,
+                    existing_nullable=existing_nullable,
+                    existing_comment=existing_comment,
+                )
+            )
+        if server_default is not False:
+            kw = {}
+            cls_: Type[
+                Union[
+                    base.ComputedColumnDefault,
+                    base.IdentityColumnDefault,
+                    base.ColumnDefault,
+                ]
+            ]
+            if sqla_compat._server_default_is_computed(
+                server_default, existing_server_default
+            ):
+                cls_ = base.ComputedColumnDefault
+            elif sqla_compat._server_default_is_identity(
+                server_default, existing_server_default
+            ):
+                cls_ = base.IdentityColumnDefault
+                kw["impl"] = self
+            else:
+                cls_ = base.ColumnDefault
+            self._exec(
+                cls_(
+                    table_name,
+                    column_name,
+                    server_default,  # type:ignore[arg-type]
+                    schema=schema,
+                    existing_type=existing_type,
+                    existing_server_default=existing_server_default,
+                    existing_nullable=existing_nullable,
+                    existing_comment=existing_comment,
+                    **kw,
+                )
+            )
+        if type_ is not None:
+            self._exec(
+                base.ColumnType(
+                    table_name,
+                    column_name,
+                    type_,
+                    schema=schema,
+                    existing_type=existing_type,
+                    existing_server_default=existing_server_default,
+                    existing_nullable=existing_nullable,
+                    existing_comment=existing_comment,
+                )
+            )
 
-    def dispose(self) -> None:
-        while True:
-            try:
-                conn = self._pool.get(False)
-                conn.close()
-            except sqla_queue.Empty:
-                break
+        if comment is not False:
+            self._exec(
+                base.ColumnComment(
+                    table_name,
+                    column_name,
+                    comment,
+                    schema=schema,
+                    existing_type=existing_type,
+                    existing_server_default=existing_server_default,
+                    existing_nullable=existing_nullable,
+                    existing_comment=existing_comment,
+                )
+            )
 
-        self._overflow = 0 - self.size()
-        self.logger.info("Pool disposed. %s", self.status())
+        # do the new name last ;)
+        if name is not None:
+            self._exec(
+                base.ColumnName(
+                    table_name,
+                    column_name,
+                    name,
+                    schema=schema,
+                    existing_type=existing_type,
+                    existing_server_default=existing_server_default,
+                    existing_nullable=existing_nullable,
+                )
+            )
 
-    def status(self) -> str:
-        return (
-            "Pool size: %d  Connections in pool: %d "
-            "Current Overflow: %d Current Checked out "
-            "connections: %d"
-            % (
-                self.size(),
-                self.checkedin(),
-                self.overflow(),
-                self.checkedout(),
+    def add_column(
+        self,
+        table_name: str,
+        column: Column[Any],
+        *,
+        schema: Optional[Union[str, quoted_name]] = None,
+        if_not_exists: Optional[bool] = None,
+    ) -> None:
+        self._exec(
+            base.AddColumn(
+                table_name,
+                column,
+                schema=schema,
+                if_not_exists=if_not_exists,
             )
         )
 
-    def size(self) -> int:
-        return self._pool.maxsize
-
-    def timeout(self) -> float:
-        return self._timeout
-
-    def checkedin(self) -> int:
-        return self._pool.qsize()
-
-    def overflow(self) -> int:
-        return self._overflow if self._pool.maxsize else 0
-
-    def checkedout(self) -> int:
-        return self._pool.maxsize - self._pool.qsize() + self._overflow
-
-
-class AsyncAdaptedQueuePool(QueuePool):
-    """An asyncio-compatible version of :class:`.QueuePool`.
-
-    This pool is used by default when using :class:`.AsyncEngine` engines that
-    were generated from :func:`_asyncio.create_async_engine`.   It uses an
-    asyncio-compatible queue implementation that does not use
-    ``threading.Lock``.
-
-    The arguments and operation of :class:`.AsyncAdaptedQueuePool` are
-    otherwise identical to that of :class:`.QueuePool`.
-
-    """
-
-    _is_asyncio = True  # type: ignore[assignment]
-    _queue_class: Type[sqla_queue.QueueCommon[ConnectionPoolEntry]] = (
-        sqla_queue.AsyncAdaptedQueue
-    )
-
-    _dialect = _AsyncConnDialect()
-
-
-class FallbackAsyncAdaptedQueuePool(AsyncAdaptedQueuePool):
-    _queue_class = sqla_queue.FallbackAsyncAdaptedQueue
-
-
-class NullPool(Pool):
-    """A Pool which does not pool connections.
-
-    Instead it literally opens and closes the underlying DB-API connection
-    per each connection open/close.
-
-    Reconnect-related functions such as ``recycle`` and connection
-    invalidation are not supported by this Pool implementation, since
-    no connections are held persistently.
-
-    The :class:`.NullPool` class **is compatible** with asyncio and
-    :func:`_asyncio.create_async_engine`.
-
-    """
-
-    def status(self) -> str:
-        return "NullPool"
-
-    def _do_return_conn(self, record: ConnectionPoolEntry) -> None:
-        record.close()
-
-    def _do_get(self) -> ConnectionPoolEntry:
-        return self._create_connection()
-
-    def recreate(self) -> NullPool:
-        self.logger.info("Pool recreating")
-
-        return self.__class__(
-            self._creator,
-            recycle=self._recycle,
-            echo=self.echo,
-            logging_name=self._orig_logging_name,
-            reset_on_return=self._reset_on_return,
-            pre_ping=self._pre_ping,
-            _dispatch=self.dispatch,
-            dialect=self._dialect,
-        )
-
-    def dispose(self) -> None:
-        pass
-
-
-class SingletonThreadPool(Pool):
-    """A Pool that maintains one connection per thread.
-
-    Maintains one connection per each thread, never moving a connection to a
-    thread other than the one which it was created in.
-
-    .. warning::  the :class:`.SingletonThreadPool` will call ``.close()``
-       on arbitrary connections that exist beyond the size setting of
-       ``pool_size``, e.g. if more unique **thread identities**
-       than what ``pool_size`` states are used.   This cleanup is
-       non-deterministic and not sensitive to whether or not the connections
-       linked to those thread identities are currently in use.
-
-       :class:`.SingletonThreadPool` may be improved in a future release,
-       however in its current status it is generally used only for test
-       scenarios using a SQLite ``:memory:`` database and is not recommended
-       for production use.
-
-    The :class:`.SingletonThreadPool` class **is not compatible** with asyncio
-    and :func:`_asyncio.create_async_engine`.
-
-
-    Options are the same as those of :class:`_pool.Pool`, as well as:
-
-    :param pool_size: The number of threads in which to maintain connections
-        at once.  Defaults to five.
-
-    :class:`.SingletonThreadPool` is used by the SQLite dialect
-    automatically when a memory-based database is used.
-    See :ref:`sqlite_toplevel`.
-
-    """
-
-    _is_asyncio = False  # type: ignore[assignment]
-
-    def __init__(
+    def drop_column(
         self,
-        creator: Union[_CreatorFnType, _CreatorWRecFnType],
-        pool_size: int = 5,
-        **kw: Any,
-    ):
-        Pool.__init__(self, creator, **kw)
-        self._conn = threading.local()
-        self._fairy = threading.local()
-        self._all_conns: Set[ConnectionPoolEntry] = set()
-        self.size = pool_size
-
-    def recreate(self) -> SingletonThreadPool:
-        self.logger.info("Pool recreating")
-        return self.__class__(
-            self._creator,
-            pool_size=self.size,
-            recycle=self._recycle,
-            echo=self.echo,
-            pre_ping=self._pre_ping,
-            logging_name=self._orig_logging_name,
-            reset_on_return=self._reset_on_return,
-            _dispatch=self.dispatch,
-            dialect=self._dialect,
+        table_name: str,
+        column: Column[Any],
+        *,
+        schema: Optional[str] = None,
+        if_exists: Optional[bool] = None,
+        **kw,
+    ) -> None:
+        self._exec(
+            base.DropColumn(
+                table_name, column, schema=schema, if_exists=if_exists
+            )
         )
 
-    def dispose(self) -> None:
-        """Dispose of this pool."""
+    def add_constraint(self, const: Any) -> None:
+        if const._create_rule is None or const._create_rule(self):
+            self._exec(schema.AddConstraint(const))
 
-        for conn in self._all_conns:
-            try:
-                conn.close()
-            except Exception:
-                # pysqlite won't even let you close a conn from a thread
-                # that didn't create it
-                pass
+    def drop_constraint(self, const: Constraint, **kw: Any) -> None:
+        self._exec(schema.DropConstraint(const, **kw))
 
-        self._all_conns.clear()
-
-    def _cleanup(self) -> None:
-        while len(self._all_conns) >= self.size:
-            c = self._all_conns.pop()
-            c.close()
-
-    def status(self) -> str:
-        return "SingletonThreadPool id:%d size: %d" % (
-            id(self),
-            len(self._all_conns),
+    def rename_table(
+        self,
+        old_table_name: str,
+        new_table_name: Union[str, quoted_name],
+        schema: Optional[Union[str, quoted_name]] = None,
+    ) -> None:
+        self._exec(
+            base.RenameTable(old_table_name, new_table_name, schema=schema)
         )
 
-    def _do_return_conn(self, record: ConnectionPoolEntry) -> None:
-        try:
-            del self._fairy.current
-        except AttributeError:
-            pass
+    def create_table(self, table: Table, **kw: Any) -> None:
+        table.dispatch.before_create(
+            table, self.connection, checkfirst=False, _ddl_runner=self
+        )
+        self._exec(schema.CreateTable(table, **kw))
+        table.dispatch.after_create(
+            table, self.connection, checkfirst=False, _ddl_runner=self
+        )
+        for index in table.indexes:
+            self._exec(schema.CreateIndex(index))
 
-    def _do_get(self) -> ConnectionPoolEntry:
-        try:
-            if TYPE_CHECKING:
-                c = cast(ConnectionPoolEntry, self._conn.current())
-            else:
-                c = self._conn.current()
-            if c:
-                return c
-        except AttributeError:
-            pass
-        c = self._create_connection()
-        self._conn.current = weakref.ref(c)
-        if len(self._all_conns) >= self.size:
-            self._cleanup()
-        self._all_conns.add(c)
-        return c
+        with_comment = (
+            self.dialect.supports_comments and not self.dialect.inline_comments
+        )
+        comment = table.comment
+        if comment and with_comment:
+            self.create_table_comment(table)
 
-    def connect(self) -> PoolProxiedConnection:
-        # vendored from Pool to include the now removed use_threadlocal
-        # behavior
-        try:
-            rec = cast(_ConnectionFairy, self._fairy.current())
-        except AttributeError:
-            pass
+        for column in table.columns:
+            comment = column.comment
+            if comment and with_comment:
+                self.create_column_comment(column)
+
+    def drop_table(self, table: Table, **kw: Any) -> None:
+        table.dispatch.before_drop(
+            table, self.connection, checkfirst=False, _ddl_runner=self
+        )
+        self._exec(schema.DropTable(table, **kw))
+        table.dispatch.after_drop(
+            table, self.connection, checkfirst=False, _ddl_runner=self
+        )
+
+    def create_index(self, index: Index, **kw: Any) -> None:
+        self._exec(schema.CreateIndex(index, **kw))
+
+    def create_table_comment(self, table: Table) -> None:
+        self._exec(schema.SetTableComment(table))
+
+    def drop_table_comment(self, table: Table) -> None:
+        self._exec(schema.DropTableComment(table))
+
+    def create_column_comment(self, column: Column[Any]) -> None:
+        self._exec(schema.SetColumnComment(column))
+
+    def drop_index(self, index: Index, **kw: Any) -> None:
+        self._exec(schema.DropIndex(index, **kw))
+
+    def bulk_insert(
+        self,
+        table: Union[TableClause, Table],
+        rows: List[dict],
+        multiinsert: bool = True,
+    ) -> None:
+        if not isinstance(rows, list):
+            raise TypeError("List expected")
+        elif rows and not isinstance(rows[0], dict):
+            raise TypeError("List of dictionaries expected")
+        if self.as_sql:
+            for row in rows:
+                self._exec(
+                    table.insert()
+                    .inline()
+                    .values(
+                        **{
+                            k: (
+                                sqla_compat._literal_bindparam(
+                                    k, v, type_=table.c[k].type
+                                )
+                                if not isinstance(
+                                    v, sqla_compat._literal_bindparam
+                                )
+                                else v
+                            )
+                            for k, v in row.items()
+                        }
+                    )
+                )
         else:
-            if rec is not None:
-                return rec._checkout_existing()
+            if rows:
+                if multiinsert:
+                    self._exec(table.insert().inline(), multiparams=rows)
+                else:
+                    for row in rows:
+                        self._exec(table.insert().inline().values(**row))
 
-        return _ConnectionFairy._checkout(self, self._fairy)
+    def _tokenize_column_type(self, column: Column) -> Params:
+        definition: str
+        definition = self.dialect.type_compiler.process(column.type).lower()
 
+        # tokenize the SQLAlchemy-generated version of a type, so that
+        # the two can be compared.
+        #
+        # examples:
+        # NUMERIC(10, 5)
+        # TIMESTAMP WITH TIMEZONE
+        # INTEGER UNSIGNED
+        # INTEGER (10) UNSIGNED
+        # INTEGER(10) UNSIGNED
+        # varchar character set utf8
+        #
 
-class StaticPool(Pool):
-    """A Pool of exactly one connection, used for all requests.
+        tokens: List[str] = re.findall(r"[\w\-_]+|\(.+?\)", definition)
 
-    Reconnect-related functions such as ``recycle`` and connection
-    invalidation (which is also used to support auto-reconnect) are only
-    partially supported right now and may not yield good results.
+        term_tokens: List[str] = []
+        paren_term = None
 
-    The :class:`.StaticPool` class **is compatible** with asyncio and
-    :func:`_asyncio.create_async_engine`.
+        for token in tokens:
+            if re.match(r"^\(.*\)$", token):
+                paren_term = token
+            else:
+                term_tokens.append(token)
 
-    """
+        params = Params(term_tokens[0], term_tokens[1:], [], {})
 
-    @util.memoized_property
-    def connection(self) -> _ConnectionRecord:
-        return _ConnectionRecord(self)
+        if paren_term:
+            term: str
+            for term in re.findall("[^(),]+", paren_term):
+                if "=" in term:
+                    key, val = term.split("=")
+                    params.kwargs[key.strip()] = val.strip()
+                else:
+                    params.args.append(term.strip())
 
-    def status(self) -> str:
-        return "StaticPool"
+        return params
 
-    def dispose(self) -> None:
-        if (
-            "connection" in self.__dict__
-            and self.connection.dbapi_connection is not None
-        ):
-            self.connection.close()
-            del self.__dict__["connection"]
+    def _column_types_match(
+        self, inspector_params: Params, metadata_params: Params
+    ) -> bool:
+        if inspector_params.token0 == metadata_params.token0:
+            return True
 
-    def recreate(self) -> StaticPool:
-        self.logger.info("Pool recreating")
-        return self.__class__(
-            creator=self._creator,
-            recycle=self._recycle,
-            reset_on_return=self._reset_on_return,
-            pre_ping=self._pre_ping,
-            echo=self.echo,
-            logging_name=self._orig_logging_name,
-            _dispatch=self.dispatch,
-            dialect=self._dialect,
+        synonyms = [{t.lower() for t in batch} for batch in self.type_synonyms]
+        inspector_all_terms = " ".join(
+            [inspector_params.token0] + inspector_params.tokens
+        )
+        metadata_all_terms = " ".join(
+            [metadata_params.token0] + metadata_params.tokens
         )
 
-    def _transfer_from(self, other_static_pool: StaticPool) -> None:
-        # used by the test suite to make a new engine / pool without
-        # losing the state of an existing SQLite :memory: connection
-        def creator(rec: ConnectionPoolEntry) -> DBAPIConnection:
-            conn = other_static_pool.connection.dbapi_connection
-            assert conn is not None
-            return conn
+        for batch in synonyms:
+            if {inspector_all_terms, metadata_all_terms}.issubset(batch) or {
+                inspector_params.token0,
+                metadata_params.token0,
+            }.issubset(batch):
+                return True
+        return False
 
-        self._invoke_creator = creator
+    def _column_args_match(
+        self, inspected_params: Params, meta_params: Params
+    ) -> bool:
+        """We want to compare column parameters. However, we only want
+        to compare parameters that are set. If they both have `collation`,
+        we want to make sure they are the same. However, if only one
+        specifies it, dont flag it for being less specific
+        """
 
-    def _create_connection(self) -> ConnectionPoolEntry:
-        raise NotImplementedError()
+        if (
+            len(meta_params.tokens) == len(inspected_params.tokens)
+            and meta_params.tokens != inspected_params.tokens
+        ):
+            return False
 
-    def _do_return_conn(self, record: ConnectionPoolEntry) -> None:
+        if (
+            len(meta_params.args) == len(inspected_params.args)
+            and meta_params.args != inspected_params.args
+        ):
+            return False
+
+        insp = " ".join(inspected_params.tokens).lower()
+        meta = " ".join(meta_params.tokens).lower()
+
+        for reg in self.type_arg_extract:
+            mi = re.search(reg, insp)
+            mm = re.search(reg, meta)
+
+            if mi and mm and mi.group(1) != mm.group(1):
+                return False
+
+        return True
+
+    def compare_type(
+        self, inspector_column: Column[Any], metadata_column: Column
+    ) -> bool:
+        """Returns True if there ARE differences between the types of the two
+        columns. Takes impl.type_synonyms into account between retrospected
+        and metadata types
+        """
+        inspector_params = self._tokenize_column_type(inspector_column)
+        metadata_params = self._tokenize_column_type(metadata_column)
+
+        if not self._column_types_match(inspector_params, metadata_params):
+            return True
+        if not self._column_args_match(inspector_params, metadata_params):
+            return True
+        return False
+
+    def compare_server_default(
+        self,
+        inspector_column,
+        metadata_column,
+        rendered_metadata_default,
+        rendered_inspector_default,
+    ):
+        return rendered_inspector_default != rendered_metadata_default
+
+    def correct_for_autogen_constraints(
+        self,
+        conn_uniques: Set[UniqueConstraint],
+        conn_indexes: Set[Index],
+        metadata_unique_constraints: Set[UniqueConstraint],
+        metadata_indexes: Set[Index],
+    ) -> None:
         pass
 
-    def _do_get(self) -> ConnectionPoolEntry:
-        rec = self.connection
-        if rec._is_hard_or_soft_invalidated():
-            del self.__dict__["connection"]
-            rec = self.connection
+    def cast_for_batch_migrate(self, existing, existing_transfer, new_type):
+        if existing.type._type_affinity is not new_type._type_affinity:
+            existing_transfer["expr"] = cast(
+                existing_transfer["expr"], new_type
+            )
 
-        return rec
+    def render_ddl_sql_expr(
+        self, expr: ClauseElement, is_server_default: bool = False, **kw: Any
+    ) -> str:
+        """Render a SQL expression that is typically a server default,
+        index expression, etc.
 
+        """
 
-class AssertionPool(Pool):
-    """A :class:`_pool.Pool` that allows at most one checked out connection at
-    any given time.
+        compile_kw = {"literal_binds": True, "include_table": False}
 
-    This will raise an exception if more than one connection is checked out
-    at a time.  Useful for debugging code that is using more connections
-    than desired.
-
-    The :class:`.AssertionPool` class **is compatible** with asyncio and
-    :func:`_asyncio.create_async_engine`.
-
-    """
-
-    _conn: Optional[ConnectionPoolEntry]
-    _checkout_traceback: Optional[List[str]]
-
-    def __init__(self, *args: Any, **kw: Any):
-        self._conn = None
-        self._checked_out = False
-        self._store_traceback = kw.pop("store_traceback", True)
-        self._checkout_traceback = None
-        Pool.__init__(self, *args, **kw)
-
-    def status(self) -> str:
-        return "AssertionPool"
-
-    def _do_return_conn(self, record: ConnectionPoolEntry) -> None:
-        if not self._checked_out:
-            raise AssertionError("connection is not checked out")
-        self._checked_out = False
-        assert record is self._conn
-
-    def dispose(self) -> None:
-        self._checked_out = False
-        if self._conn:
-            self._conn.close()
-
-    def recreate(self) -> AssertionPool:
-        self.logger.info("Pool recreating")
-        return self.__class__(
-            self._creator,
-            echo=self.echo,
-            pre_ping=self._pre_ping,
-            recycle=self._recycle,
-            reset_on_return=self._reset_on_return,
-            logging_name=self._orig_logging_name,
-            _dispatch=self.dispatch,
-            dialect=self._dialect,
+        return str(
+            expr.compile(dialect=self.dialect, compile_kwargs=compile_kw)
         )
 
-    def _do_get(self) -> ConnectionPoolEntry:
-        if self._checked_out:
-            if self._checkout_traceback:
-                suffix = " at:\n%s" % "".join(
-                    chop_traceback(self._checkout_traceback)
+    def _compat_autogen_column_reflect(self, inspector: Inspector) -> Callable:
+        return self.autogen_column_reflect
+
+    def correct_for_autogen_foreignkeys(
+        self,
+        conn_fks: Set[ForeignKeyConstraint],
+        metadata_fks: Set[ForeignKeyConstraint],
+    ) -> None:
+        pass
+
+    def autogen_column_reflect(self, inspector, table, column_info):
+        """A hook that is attached to the 'column_reflect' event for when
+        a Table is reflected from the database during the autogenerate
+        process.
+
+        Dialects can elect to modify the information gathered here.
+
+        """
+
+    def start_migrations(self) -> None:
+        """A hook called when :meth:`.EnvironmentContext.run_migrations`
+        is called.
+
+        Implementations can set up per-migration-run state here.
+
+        """
+
+    def emit_begin(self) -> None:
+        """Emit the string ``BEGIN``, or the backend-specific
+        equivalent, on the current connection context.
+
+        This is used in offline mode and typically
+        via :meth:`.EnvironmentContext.begin_transaction`.
+
+        """
+        self.static_output("BEGIN" + self.command_terminator)
+
+    def emit_commit(self) -> None:
+        """Emit the string ``COMMIT``, or the backend-specific
+        equivalent, on the current connection context.
+
+        This is used in offline mode and typically
+        via :meth:`.EnvironmentContext.begin_transaction`.
+
+        """
+        self.static_output("COMMIT" + self.command_terminator)
+
+    def render_type(
+        self, type_obj: TypeEngine, autogen_context: AutogenContext
+    ) -> Union[str, Literal[False]]:
+        return False
+
+    def _compare_identity_default(self, metadata_identity, inspector_identity):
+        # ignored contains the attributes that were not considered
+        # because assumed to their default values in the db.
+        diff, ignored = _compare_identity_options(
+            metadata_identity,
+            inspector_identity,
+            schema.Identity(),
+            skip={"always"},
+        )
+
+        meta_always = getattr(metadata_identity, "always", None)
+        inspector_always = getattr(inspector_identity, "always", None)
+        # None and False are the same in this comparison
+        if bool(meta_always) != bool(inspector_always):
+            diff.add("always")
+
+        diff.difference_update(self.identity_attrs_ignore)
+
+        # returns 3 values:
+        return (
+            # different identity attributes
+            diff,
+            # ignored identity attributes
+            ignored,
+            # if the two identity should be considered different
+            bool(diff) or bool(metadata_identity) != bool(inspector_identity),
+        )
+
+    def _compare_index_unique(
+        self, metadata_index: Index, reflected_index: Index
+    ) -> Optional[str]:
+        conn_unique = bool(reflected_index.unique)
+        meta_unique = bool(metadata_index.unique)
+        if conn_unique != meta_unique:
+            return f"unique={conn_unique} to unique={meta_unique}"
+        else:
+            return None
+
+    def _create_metadata_constraint_sig(
+        self, constraint: _autogen._C, **opts: Any
+    ) -> _constraint_sig[_autogen._C]:
+        return _constraint_sig.from_constraint(True, self, constraint, **opts)
+
+    def _create_reflected_constraint_sig(
+        self, constraint: _autogen._C, **opts: Any
+    ) -> _constraint_sig[_autogen._C]:
+        return _constraint_sig.from_constraint(False, self, constraint, **opts)
+
+    def compare_indexes(
+        self,
+        metadata_index: Index,
+        reflected_index: Index,
+    ) -> ComparisonResult:
+        """Compare two indexes by comparing the signature generated by
+        ``create_index_sig``.
+
+        This method returns a ``ComparisonResult``.
+        """
+        msg: List[str] = []
+        unique_msg = self._compare_index_unique(
+            metadata_index, reflected_index
+        )
+        if unique_msg:
+            msg.append(unique_msg)
+        m_sig = self._create_metadata_constraint_sig(metadata_index)
+        r_sig = self._create_reflected_constraint_sig(reflected_index)
+
+        assert _autogen.is_index_sig(m_sig)
+        assert _autogen.is_index_sig(r_sig)
+
+        # The assumption is that the index have no expression
+        for sig in m_sig, r_sig:
+            if sig.has_expressions:
+                log.warning(
+                    "Generating approximate signature for index %s. "
+                    "The dialect "
+                    "implementation should either skip expression indexes "
+                    "or provide a custom implementation.",
+                    sig.const,
                 )
-            else:
-                suffix = ""
-            raise AssertionError("connection is already checked out" + suffix)
 
-        if not self._conn:
-            self._conn = self._create_connection()
+        if m_sig.column_names != r_sig.column_names:
+            msg.append(
+                f"expression {r_sig.column_names} to {m_sig.column_names}"
+            )
 
-        self._checked_out = True
-        if self._store_traceback:
-            self._checkout_traceback = traceback.format_stack()
-        return self._conn
+        if msg:
+            return ComparisonResult.Different(msg)
+        else:
+            return ComparisonResult.Equal()
+
+    def compare_unique_constraint(
+        self,
+        metadata_constraint: UniqueConstraint,
+        reflected_constraint: UniqueConstraint,
+    ) -> ComparisonResult:
+        """Compare two unique constraints by comparing the two signatures.
+
+        The arguments are two tuples that contain the unique constraint and
+        the signatures generated by ``create_unique_constraint_sig``.
+
+        This method returns a ``ComparisonResult``.
+        """
+        metadata_tup = self._create_metadata_constraint_sig(
+            metadata_constraint
+        )
+        reflected_tup = self._create_reflected_constraint_sig(
+            reflected_constraint
+        )
+
+        meta_sig = metadata_tup.unnamed
+        conn_sig = reflected_tup.unnamed
+        if conn_sig != meta_sig:
+            return ComparisonResult.Different(
+                f"expression {conn_sig} to {meta_sig}"
+            )
+        else:
+            return ComparisonResult.Equal()
+
+    def _skip_functional_indexes(self, metadata_indexes, conn_indexes):
+        conn_indexes_by_name = {c.name: c for c in conn_indexes}
+
+        for idx in list(metadata_indexes):
+            if idx.name in conn_indexes_by_name:
+                continue
+            iex = sqla_compat.is_expression_index(idx)
+            if iex:
+                util.warn(
+                    "autogenerate skipping metadata-specified "
+                    "expression-based index "
+                    f"{idx.name!r}; dialect {self.__dialect__!r} under "
+                    f"SQLAlchemy {sqla_compat.sqlalchemy_version} can't "
+                    "reflect these indexes so they can't be compared"
+                )
+                metadata_indexes.discard(idx)
+
+    def adjust_reflected_dialect_options(
+        self, reflected_object: Dict[str, Any], kind: str
+    ) -> Dict[str, Any]:
+        return reflected_object.get("dialect_options", {})
+
+
+class Params(NamedTuple):
+    token0: str
+    tokens: List[str]
+    args: List[str]
+    kwargs: Dict[str, str]
+
+
+def _compare_identity_options(
+    metadata_io: Union[schema.Identity, schema.Sequence, None],
+    inspector_io: Union[schema.Identity, schema.Sequence, None],
+    default_io: Union[schema.Identity, schema.Sequence],
+    skip: Set[str],
+):
+    # this can be used for identity or sequence compare.
+    # default_io is an instance of IdentityOption with all attributes to the
+    # default value.
+    meta_d = sqla_compat._get_identity_options_dict(metadata_io)
+    insp_d = sqla_compat._get_identity_options_dict(inspector_io)
+
+    diff = set()
+    ignored_attr = set()
+
+    def check_dicts(
+        meta_dict: Mapping[str, Any],
+        insp_dict: Mapping[str, Any],
+        default_dict: Mapping[str, Any],
+        attrs: Iterable[str],
+    ):
+        for attr in set(attrs).difference(skip):
+            meta_value = meta_dict.get(attr)
+            insp_value = insp_dict.get(attr)
+            if insp_value != meta_value:
+                default_value = default_dict.get(attr)
+                if meta_value == default_value:
+                    ignored_attr.add(attr)
+                else:
+                    diff.add(attr)
+
+    check_dicts(
+        meta_d,
+        insp_d,
+        sqla_compat._get_identity_options_dict(default_io),
+        set(meta_d).union(insp_d),
+    )
+    if sqla_compat.identity_has_dialect_kwargs:
+        assert hasattr(default_io, "dialect_kwargs")
+        # use only the dialect kwargs in inspector_io since metadata_io
+        # can have options for many backends
+        check_dicts(
+            getattr(metadata_io, "dialect_kwargs", {}),
+            getattr(inspector_io, "dialect_kwargs", {}),
+            default_io.dialect_kwargs,
+            getattr(inspector_io, "dialect_kwargs", {}),
+        )
+
+    return diff, ignored_attr

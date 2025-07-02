@@ -6,8 +6,8 @@ class Tickformatstop(_BaseTraceHierarchyType):
 
     # class properties
     # --------------------
-    _parent_path_str = "volume.colorbar"
-    _path_str = "volume.colorbar.tickformatstop"
+    _parent_path_str = "contour.colorbar"
+    _path_str = "contour.colorbar.tickformatstop"
     _valid_props = {"dtickrange", "enabled", "name", "templateitemname", "value"}
 
     # dtickrange
@@ -187,8 +187,8 @@ class Tickformatstop(_BaseTraceHierarchyType):
         ----------
         arg
             dict of properties compatible with this constructor or
-            an instance of :class:`plotly.graph_objs.volume.colorba
-            r.Tickformatstop`
+            an instance of :class:`plotly.graph_objs.contour.colorb
+            ar.Tickformatstop`
         dtickrange
             range [*min*, *max*], where "min", "max" - dtick values
             which describe some zoom level, it is possible to omit
@@ -241,9 +241,9 @@ class Tickformatstop(_BaseTraceHierarchyType):
         else:
             raise ValueError(
                 """\
-The first argument to the plotly.graph_objs.volume.colorbar.Tickformatstop
+The first argument to the plotly.graph_objs.contour.colorbar.Tickformatstop
 constructor must be a dict or
-an instance of :class:`plotly.graph_objs.volume.colorbar.Tickformatstop`"""
+an instance of :class:`plotly.graph_objs.contour.colorbar.Tickformatstop`"""
             )
 
         # Handle skip_invalid

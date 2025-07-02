@@ -1,9 +1,18 @@
-"""`tqdm` version detector. Precedence: installed dist, git, 'UNKNOWN'."""
-try:
-    from ._dist_ver import __version__
-except ImportError:
-    try:
-        from setuptools_scm import get_version
-        __version__ = get_version(root='..', relative_to=__file__)
-    except (ImportError, LookupError):
-        __version__ = "UNKNOWN"
+# Copyright 2014 Google Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+__version__ = '0.12.0'
+
+# For backward-compatibility with earlier versions of json5:
+VERSION = __version__

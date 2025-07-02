@@ -1,316 +1,283 @@
-#!/usr/bin/env python
-# -*- encoding: utf-8 -*-
-"""Core resampling interface"""
+"""
+Core functions and attributes for the matplotlib style library:
 
+``use``
+    Select style sheet to override the current matplotlib settings.
+``context``
+    Context manager to use a style sheet temporarily.
+``available``
+    List available style sheets.
+``library``
+    A dictionary of style names and matplotlib settings.
+"""
+
+import contextlib
+import logging
+import os
+from pathlib import Path
+import sys
 import warnings
-import numpy as np
-import numba
 
-from .filters import get_filter
+if sys.version_info >= (3, 10):
+    import importlib.resources as importlib_resources
+else:
+    # Even though Py3.9 has importlib.resources, it doesn't properly handle
+    # modules added in sys.path.
+    import importlib_resources
 
-from .interpn import resample_f_s, resample_f_p
+import matplotlib as mpl
+from matplotlib import _api, _docstring, _rc_params_in_file, rcParamsDefault
 
-__all__ = ["resample", "resample_nu"]
+_log = logging.getLogger(__name__)
+
+__all__ = ['use', 'context', 'available', 'library', 'reload_library']
 
 
-def resample(
-    x, sr_orig, sr_new, axis=-1, filter="kaiser_best", parallel=False, **kwargs
-):
-    """Resample a signal x from sr_orig to sr_new along a given axis.
+BASE_LIBRARY_PATH = os.path.join(mpl.get_data_path(), 'stylelib')
+# Users may want multiple library paths, so store a list of paths.
+USER_LIBRARY_PATHS = [os.path.join(mpl.get_configdir(), 'stylelib')]
+STYLE_EXTENSION = 'mplstyle'
+# A list of rcParams that should not be applied from styles
+STYLE_BLACKLIST = {
+    'interactive', 'backend', 'webagg.port', 'webagg.address',
+    'webagg.port_retries', 'webagg.open_in_browser', 'backend_fallback',
+    'toolbar', 'timezone', 'figure.max_open_warning',
+    'figure.raise_window', 'savefig.directory', 'tk.window_focus',
+    'docstring.hardcopy', 'date.epoch'}
+_DEPRECATED_SEABORN_STYLES = {
+    s: s.replace("seaborn", "seaborn-v0_8")
+    for s in [
+        "seaborn",
+        "seaborn-bright",
+        "seaborn-colorblind",
+        "seaborn-dark",
+        "seaborn-darkgrid",
+        "seaborn-dark-palette",
+        "seaborn-deep",
+        "seaborn-muted",
+        "seaborn-notebook",
+        "seaborn-paper",
+        "seaborn-pastel",
+        "seaborn-poster",
+        "seaborn-talk",
+        "seaborn-ticks",
+        "seaborn-white",
+        "seaborn-whitegrid",
+    ]
+}
+_DEPRECATED_SEABORN_MSG = (
+    "The seaborn styles shipped by Matplotlib are deprecated since %(since)s, "
+    "as they no longer correspond to the styles shipped by seaborn. However, "
+    "they will remain available as 'seaborn-v0_8-<style>'. Alternatively, "
+    "directly use the seaborn API instead.")
 
-    Parameters
-    ----------
-    x : np.ndarray, dtype=np.float*
-        The input signal(s) to resample.
 
-    sr_orig : int > 0
-        The sampling rate of x
-
-    sr_new : int > 0
-        The target sampling rate of the output signal(s)
-
-        If `sr_new == sr_orig`, then a copy of `x` is returned with no
-        interpolation performed.
-
-    axis : int
-        The target axis along which to resample `x`
-
-    filter : optional, str or callable
-        The resampling filter to use.
-
-        By default, uses the `kaiser_best` (pre-computed filter).
-
-    parallel : optional, bool
-        Enable/disable parallel computation exploiting multi-threading.
-
-        Default: False.
-
-    **kwargs
-        additional keyword arguments provided to the specified filter
-
-    Returns
-    -------
-    y : np.ndarray
-        `x` resampled to `sr_new`
-
-    Raises
-    ------
-    ValueError
-        if `sr_orig` or `sr_new` is not positive
-    TypeError
-        if the input signal `x` has an unsupported data type.
-
-    Examples
-    --------
-    >>> import resampy
-    >>> np.set_printoptions(precision=3, suppress=True)
-    >>> # Generate a sine wave at 440 Hz for 5 seconds
-    >>> sr_orig = 44100.0
-    >>> x = np.sin(2 * np.pi * 440.0 / sr_orig * np.arange(5 * sr_orig))
-    >>> x
-    array([ 0.   ,  0.063, ..., -0.125, -0.063])
-    >>> # Resample to 22050 with default parameters
-    >>> resampy.resample(x, sr_orig, 22050)
-    array([ 0.011,  0.122,  0.25 , ..., -0.366, -0.25 , -0.122])
-    >>> # Resample using the fast (low-quality) filter
-    >>> resampy.resample(x, sr_orig, 22050, filter='kaiser_fast')
-    array([ 0.012,  0.121,  0.251, ..., -0.365, -0.251, -0.121])
-    >>> # Resample using a high-quality filter
-    >>> resampy.resample(x, sr_orig, 22050, filter='kaiser_best')
-    array([ 0.011,  0.122,  0.25 , ..., -0.366, -0.25 , -0.122])
-    >>> # Resample using a Hann-windowed sinc filter
-    >>> import scipy.signal
-    >>> resampy.resample(x, sr_orig, 22050, filter='sinc_window',
-    ...                  window=scipy.signal.hann)
-    array([ 0.011,  0.123,  0.25 , ..., -0.366, -0.25 , -0.123])
-
-    >>> # Generate stereo data
-    >>> x_right = np.sin(2 * np.pi * 880.0 / sr_orig * np.arange(len(x)))
-    >>> x_stereo = np.stack([x, x_right])
-    >>> x_stereo.shape
-    (2, 220500)
-    >>> # Resample along the time axis (1)
-    >>> y_stereo = resampy.resample(x_stereo, sr_orig, 22050, axis=1)
-    >>> y_stereo.shape
-    (2, 110250)
+@_docstring.Substitution(
+    "\n".join(map("- {}".format, sorted(STYLE_BLACKLIST, key=str.lower)))
+)
+def use(style):
     """
+    Use Matplotlib style settings from a style specification.
 
-    if sr_orig <= 0:
-        raise ValueError("Invalid sample rate: sr_orig={}".format(sr_orig))
+    The style name of 'default' is reserved for reverting back to
+    the default style settings.
 
-    if sr_new <= 0:
-        raise ValueError("Invalid sample rate: sr_new={}".format(sr_new))
+    .. note::
 
-    if sr_orig == sr_new:
-        # If the output rate matches, return a copy
-        return x.copy()
-
-    sample_ratio = float(sr_new) / sr_orig
-
-    # Set up the output shape
-    shape = list(x.shape)
-    # Explicitly recalculate length here instead of using sample_ratio
-    # This avoids a floating point round-off error identified as #111
-    shape[axis] = int(shape[axis] * float(sr_new) / float(sr_orig))
-
-    if shape[axis] < 1:
-        raise ValueError(
-            "Input signal length={} is too small to "
-            "resample from {}->{}".format(x.shape[axis], sr_orig, sr_new)
-        )
-
-    # Preserve contiguity of input (if it exists)
-    if np.issubdtype(x.dtype, np.integer):
-        dtype = np.float32
-    else:
-        dtype = x.dtype
-
-    y = np.zeros_like(x, dtype=dtype, shape=shape)
-
-    interp_win, precision, _ = get_filter(filter, **kwargs)
-
-    if sample_ratio < 1:
-        # Make a copy to prevent modifying the filters in place
-        interp_win = sample_ratio * interp_win
-
-    interp_delta = np.diff(interp_win, append=interp_win[-1])
-
-    scale = min(1.0, sample_ratio)
-    time_increment = 1.0 / sample_ratio
-    t_out = np.arange(shape[axis]) * time_increment
-
-    if parallel:
-        try:
-            resample_f_p(
-                x.swapaxes(-1, axis),
-                t_out,
-                interp_win,
-                interp_delta,
-                precision,
-                scale,
-                y.swapaxes(-1, axis),
-            )
-        except numba.TypingError as exc:
-            warnings.warn(
-                f"{exc}\nFallback to the sequential version.",
-                stacklevel=2)
-
-            resample_f_s(
-                x.swapaxes(-1, axis),
-                t_out,
-                interp_win,
-                interp_delta,
-                precision,
-                scale,
-                y.swapaxes(-1, axis),
-            )
-    else:
-        resample_f_s(
-            x.swapaxes(-1, axis),
-            t_out,
-            interp_win,
-            interp_delta,
-            precision,
-            scale,
-            y.swapaxes(-1, axis),
-        )
-
-    return y
-
-
-def resample_nu(
-    x, sr_orig, t_out, axis=-1, filter="kaiser_best", parallel=False, **kwargs
-):
-    """Interpolate a signal x at specified positions (t_out) along a given axis.
+       This updates the `.rcParams` with the settings from the style.
+       `.rcParams` not defined in the style are kept.
 
     Parameters
     ----------
-    x : np.ndarray, dtype=np.float*
-        The input signal(s) to resample.
+    style : str, dict, Path or list
 
-    sr_orig : float
-        Sampling rate of the input signal (x).
+        A style specification. Valid options are:
 
-    t_out : np.ndarray, dtype=np.float*
-        Position of the output samples.
+        str
+            - One of the style names in `.style.available` (a builtin style or
+              a style installed in the user library path).
 
-    axis : int
-        The target axis along which to resample `x`
+            - A dotted name of the form "package.style_name"; in that case,
+              "package" should be an importable Python package name, e.g. at
+              ``/path/to/package/__init__.py``; the loaded style file is
+              ``/path/to/package/style_name.mplstyle``.  (Style files in
+              subpackages are likewise supported.)
 
-    filter : optional, str or callable
-        The resampling filter to use.
+            - The path or URL to a style file, which gets loaded by
+              `.rc_params_from_file`.
 
-        By default, uses the `kaiser_best` (pre-computed filter).
+        dict
+            A mapping of key/value pairs for `matplotlib.rcParams`.
 
-    parallel : optional, bool
-        Enable/disable parallel computation exploiting multi-threading.
+        Path
+            The path to a style file, which gets loaded by
+            `.rc_params_from_file`.
 
-        Default: True.
-
-    **kwargs
-        additional keyword arguments provided to the specified filter
-
-    Returns
-    -------
-    y : np.ndarray
-        `x` resampled to `t_out`
-
-    Raises
-    ------
-    TypeError
-        if the input signal `x` has an unsupported data type.
+        list
+            A list of style specifiers (str, Path or dict), which are applied
+            from first to last in the list.
 
     Notes
     -----
-    Differently form the `resample` function the filter `rolloff`
-    is not automatically adapted in case of subsampling.
-    For this reason results obtained with the `resample_nu` could be slightly
-    different form the ones obtained with `resample` if the filter
-    parameters are not carefully set by the user.
+    The following `.rcParams` are not related to style and will be ignored if
+    found in a style specification:
 
-    Examples
-    --------
-    >>> import resampy
-    >>> np.set_printoptions(precision=3, suppress=True)
-    >>> # Generate a sine wave at 100 Hz for 5 seconds
-    >>> sr_orig = 100.0
-    >>> f0 = 1
-    >>> t = np.arange(5 * sr_orig) / sr_orig
-    >>> x = np.sin(2 * np.pi * f0 * t)
-    >>> x
-    array([ 0.   ,  0.063,  0.125, ..., -0.187, -0.125, -0.063])
-    >>> # Resample to non-uniform sampling
-    >>> t_new = np.log2(1 + t)[::5] - t[0]
-    >>> resampy.resample_nu(x, sr_orig, t_new)
-    array([ 0.001,  0.427,  0.76 , ..., -0.3  , -0.372, -0.442])
+    %s
     """
-    if sr_orig <= 0:
-        raise ValueError("Invalid sample rate: sr_orig={}".format(sr_orig))
-
-    t_out = np.asarray(t_out)
-    if t_out.ndim != 1:
-        raise ValueError(
-            "Invalid t_out shape ({}), 1D array expected".format(t_out.shape)
-        )
-    if np.min(t_out) < 0 or np.max(t_out) > (x.shape[axis] - 1) / sr_orig:
-        raise ValueError(
-            "Output domain [{}, {}] exceeds the data domain [0, {}]".format(
-                np.min(t_out), np.max(t_out), (x.shape[axis] - 1) / sr_orig
-            )
-        )
-
-    # Set up the output shape
-    shape = list(x.shape)
-    shape[axis] = len(t_out)
-
-    if np.issubdtype(x.dtype, np.integer):
-        dtype = np.float32
+    if isinstance(style, (str, Path)) or hasattr(style, 'keys'):
+        # If name is a single str, Path or dict, make it a single element list.
+        styles = [style]
     else:
-        dtype = x.dtype
-    y = np.zeros_like(x, dtype=dtype, shape=shape)
+        styles = style
 
-    interp_win, precision, _ = get_filter(filter, **kwargs)
+    style_alias = {'mpl20': 'default', 'mpl15': 'classic'}
 
-    interp_delta = np.diff(interp_win, append=interp_win[-1])
+    for style in styles:
+        if isinstance(style, str):
+            style = style_alias.get(style, style)
+            if style in _DEPRECATED_SEABORN_STYLES:
+                _api.warn_deprecated("3.6", message=_DEPRECATED_SEABORN_MSG)
+                style = _DEPRECATED_SEABORN_STYLES[style]
+            if style == "default":
+                # Deprecation warnings were already handled when creating
+                # rcParamsDefault, no need to reemit them here.
+                with _api.suppress_matplotlib_deprecation_warning():
+                    # don't trigger RcParams.__getitem__('backend')
+                    style = {k: rcParamsDefault[k] for k in rcParamsDefault
+                             if k not in STYLE_BLACKLIST}
+            elif style in library:
+                style = library[style]
+            elif "." in style:
+                pkg, _, name = style.rpartition(".")
+                try:
+                    path = (importlib_resources.files(pkg)
+                            / f"{name}.{STYLE_EXTENSION}")
+                    style = _rc_params_in_file(path)
+                except (ModuleNotFoundError, OSError, TypeError) as exc:
+                    # There is an ambiguity whether a dotted name refers to a
+                    # package.style_name or to a dotted file path.  Currently,
+                    # we silently try the first form and then the second one;
+                    # in the future, we may consider forcing file paths to
+                    # either use Path objects or be prepended with "./" and use
+                    # the slash as marker for file paths.
+                    pass
+        if isinstance(style, (str, Path)):
+            try:
+                style = _rc_params_in_file(style)
+            except IOError as err:
+                raise IOError(
+                    f"{style!r} is not a valid package style, path of style "
+                    f"file, URL of style file, or library style name (library "
+                    f"styles are listed in `style.available`)") from err
+        filtered = {}
+        for k in style:  # don't trigger RcParams.__getitem__('backend')
+            if k in STYLE_BLACKLIST:
+                _api.warn_external(
+                    f"Style includes a parameter, {k!r}, that is not "
+                    f"related to style.  Ignoring this parameter.")
+            else:
+                filtered[k] = style[k]
+        mpl.rcParams.update(filtered)
 
-    # Normalize t_out
-    if sr_orig != 1.0:
-        t_out = t_out * sr_orig
 
-    if parallel:
-        try:
-            resample_f_p(
-                x.swapaxes(-1, axis),
-                t_out,
-                interp_win,
-                interp_delta,
-                precision,
-                1.0,
-                y.swapaxes(-1, axis),
-            )
-        except numba.TypingError as exc:
-            warnings.warn(
-                f"{exc}\nFallback to the sequential version.",
-                stacklevel=2)
+@contextlib.contextmanager
+def context(style, after_reset=False):
+    """
+    Context manager for using style settings temporarily.
 
-            resample_f_s(
-                x.swapaxes(-1, axis),
-                t_out,
-                interp_win,
-                interp_delta,
-                precision,
-                1.0,
-                y.swapaxes(-1, axis),
-            )
-    else:
-        resample_f_s(
-            x.swapaxes(-1, axis),
-            t_out,
-            interp_win,
-            interp_delta,
-            precision,
-            1.0,
-            y.swapaxes(-1, axis),
-        )
+    Parameters
+    ----------
+    style : str, dict, Path or list
+        A style specification. Valid options are:
 
-    return y
+        str
+            - One of the style names in `.style.available` (a builtin style or
+              a style installed in the user library path).
+
+            - A dotted name of the form "package.style_name"; in that case,
+              "package" should be an importable Python package name, e.g. at
+              ``/path/to/package/__init__.py``; the loaded style file is
+              ``/path/to/package/style_name.mplstyle``.  (Style files in
+              subpackages are likewise supported.)
+
+            - The path or URL to a style file, which gets loaded by
+              `.rc_params_from_file`.
+        dict
+            A mapping of key/value pairs for `matplotlib.rcParams`.
+
+        Path
+            The path to a style file, which gets loaded by
+            `.rc_params_from_file`.
+
+        list
+            A list of style specifiers (str, Path or dict), which are applied
+            from first to last in the list.
+
+    after_reset : bool
+        If True, apply style after resetting settings to their defaults;
+        otherwise, apply style on top of the current settings.
+    """
+    with mpl.rc_context():
+        if after_reset:
+            mpl.rcdefaults()
+        use(style)
+        yield
+
+
+def update_user_library(library):
+    """Update style library with user-defined rc files."""
+    for stylelib_path in map(os.path.expanduser, USER_LIBRARY_PATHS):
+        styles = read_style_directory(stylelib_path)
+        update_nested_dict(library, styles)
+    return library
+
+
+def read_style_directory(style_dir):
+    """Return dictionary of styles defined in *style_dir*."""
+    styles = dict()
+    for path in Path(style_dir).glob(f"*.{STYLE_EXTENSION}"):
+        with warnings.catch_warnings(record=True) as warns:
+            styles[path.stem] = _rc_params_in_file(path)
+        for w in warns:
+            _log.warning('In %s: %s', path, w.message)
+    return styles
+
+
+def update_nested_dict(main_dict, new_dict):
+    """
+    Update nested dict (only level of nesting) with new values.
+
+    Unlike `dict.update`, this assumes that the values of the parent dict are
+    dicts (or dict-like), so you shouldn't replace the nested dict if it
+    already exists. Instead you should update the sub-dict.
+    """
+    # update named styles specified by user
+    for name, rc_dict in new_dict.items():
+        main_dict.setdefault(name, {}).update(rc_dict)
+    return main_dict
+
+
+class _StyleLibrary(dict):
+    def __getitem__(self, key):
+        if key in _DEPRECATED_SEABORN_STYLES:
+            _api.warn_deprecated("3.6", message=_DEPRECATED_SEABORN_MSG)
+            key = _DEPRECATED_SEABORN_STYLES[key]
+
+        return dict.__getitem__(self, key)
+
+
+# Load style library
+# ==================
+_base_library = read_style_directory(BASE_LIBRARY_PATH)
+library = _StyleLibrary()
+available = []
+
+
+def reload_library():
+    """Reload the style library."""
+    library.clear()
+    library.update(update_user_library(_base_library))
+    available[:] = sorted(library.keys())
+
+
+reload_library()

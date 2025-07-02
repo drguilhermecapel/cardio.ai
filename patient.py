@@ -1,122 +1,162 @@
 """
-Patient model.
+Patient schemas.
 """
 
 from datetime import date, datetime
-from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from app.models.base import Base
-
-if TYPE_CHECKING:
-    from app.models.ecg_analysis import ECGAnalysis
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
-class Patient(Base):
-    """Patient model."""
+class PatientBase(BaseModel):
+    """Base patient schema."""
 
-    __tablename__ = "patients"
+    patient_id: str = Field(..., min_length=1, max_length=50)
+    mrn: str | None = Field(None, max_length=50)
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    date_of_birth: date
+    gender: str = Field(..., pattern="^(male|female|other)$")
+    phone: str | None = Field(None, max_length=20)
+    email: EmailStr | None = None
+    address: str | None = None
+    height_cm: int | None = Field(None, ge=50, le=250)
+    weight_kg: float | None = Field(None, ge=1.0, le=500.0)
+    blood_type: str | None = Field(None, pattern="^(A|B|AB|O)[+-]?$")
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-
-    patient_id: Mapped[str] = mapped_column(
-        String(50), unique=True, index=True, nullable=False
-    )
-    mrn: Mapped[str | None] = mapped_column(
-        String(50), index=True
-    )  # Medical Record Number
-
-    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    date_of_birth: Mapped[date] = mapped_column(Date, nullable=False)
-    gender: Mapped[str] = mapped_column(String(10), nullable=False)
-
-    phone: Mapped[str | None] = mapped_column(String(20))
-    email: Mapped[str | None] = mapped_column(String(255))
-    address: Mapped[str | None] = mapped_column(Text)
-
-    height_cm: Mapped[int | None] = mapped_column(Integer)
-    weight_kg: Mapped[float | None] = mapped_column()
-    blood_type: Mapped[str | None] = mapped_column(String(5))
-
-    emergency_contact_name: Mapped[str | None] = mapped_column(String(200))
-    emergency_contact_phone: Mapped[str | None] = mapped_column(String(20))
-    emergency_contact_relationship: Mapped[str | None] = mapped_column(String(50))
-
-    allergies: Mapped[str | None] = mapped_column(Text)  # JSON
-    medications: Mapped[str | None] = mapped_column(Text)  # JSON
-    medical_history: Mapped[str | None] = mapped_column(Text)  # JSON
-    family_history: Mapped[str | None] = mapped_column(Text)  # JSON
-
-    insurance_provider: Mapped[str | None] = mapped_column(String(200))
-    insurance_number: Mapped[str | None] = mapped_column(String(50))
-
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-    consent_for_research: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
-    )
-    consent_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    data_retention_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
-
-    created_by: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-
-    analyses: Mapped[list["ECGAnalysis"]] = relationship(
-        "ECGAnalysis", back_populates="patient", cascade="all, delete-orphan"
-    )
-
-    def __repr__(self) -> str:
-        return f"<Patient(id={self.id}, patient_id='{self.patient_id}', name='{self.full_name}')>"
-
-    @property
-    def full_name(self) -> str:
-        """Get full name."""
-        return f"{self.first_name} {self.last_name}"
-
-    @property
-    def age(self) -> int:
-        """Calculate age."""
+    @field_validator("date_of_birth")
+    @classmethod
+    def validate_date_of_birth(cls, v: date) -> date:
+        """Validate date of birth."""
         today = date.today()
-        return (
-            today.year
-            - self.date_of_birth.year
-            - (
-                (today.month, today.day)
-                < (self.date_of_birth.month, self.date_of_birth.day)
-            )
-        )
-
-    @property
-    def bmi(self) -> float | None:
-        """Calculate BMI."""
-        if self.height_cm and self.weight_kg:
-            height_m = self.height_cm / 100
-            return round(self.weight_kg / (height_m**2), 1)
-        return None
+        if v > today:
+            raise ValueError("Date of birth cannot be in the future")
+        if (today - v).days > 365 * 150:  # 150 years
+            raise ValueError("Date of birth cannot be more than 150 years ago")
+        return v
 
 
-class PatientNote(Base):
-    """Patient note model."""
+class PatientCreate(PatientBase):
+    """Patient creation schema."""
 
-    __tablename__ = "patient_notes"
+    emergency_contact_name: str | None = Field(None, max_length=200)
+    emergency_contact_phone: str | None = Field(None, max_length=20)
+    emergency_contact_relationship: str | None = Field(None, max_length=50)
+    allergies: list[str] | None = None
+    medications: list[str] | None = None
+    medical_history: list[str] | None = None
+    family_history: list[str] | None = None
+    insurance_provider: str | None = Field(None, max_length=200)
+    insurance_number: str | None = Field(None, max_length=50)
+    consent_for_research: bool = False
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    patient_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    author_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
 
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    note_type: Mapped[str] = mapped_column(
-        String(50), nullable=False
-    )  # clinical, administrative, etc.
+class PatientUpdate(BaseModel):
+    """Patient update schema."""
 
-    is_confidential: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
+    mrn: str | None = Field(None, max_length=50)
+    first_name: str | None = Field(None, min_length=1, max_length=100)
+    last_name: str | None = Field(None, min_length=1, max_length=100)
+    phone: str | None = Field(None, max_length=20)
+    email: EmailStr | None = None
+    address: str | None = None
+    height_cm: int | None = Field(None, ge=50, le=250)
+    weight_kg: float | None = Field(None, ge=1.0, le=500.0)
+    blood_type: str | None = Field(None, pattern="^(A|B|AB|O)[+-]?$")
+    emergency_contact_name: str | None = Field(None, max_length=200)
+    emergency_contact_phone: str | None = Field(None, max_length=20)
+    emergency_contact_relationship: str | None = Field(None, max_length=50)
+    allergies: list[str] | None = None
+    medications: list[str] | None = None
+    medical_history: list[str] | None = None
+    family_history: list[str] | None = None
+    insurance_provider: str | None = Field(None, max_length=200)
+    insurance_number: str | None = Field(None, max_length=50)
+
+
+class PatientInDB(PatientBase):
+    """Patient in database schema."""
+
+    id: int
+    is_active: bool
+    consent_for_research: bool
+    consent_date: datetime | None
+    data_retention_until: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class Patient(PatientInDB):
+    """Patient response schema."""
+
+    age: int
+    bmi: float | None
+
+    class Config:
+        from_attributes = True
+
+
+class PatientList(BaseModel):
+    """Patient list response schema."""
+
+    patients: list[Patient]
+    total: int
+    page: int
+    size: int
+
+
+class PatientSearch(BaseModel):
+    """Patient search schema."""
+
+    query: str = Field(..., min_length=1, max_length=100)
+    search_fields: list[str] = Field(
+        default=["patient_id", "mrn", "first_name", "last_name", "email"], min_length=1
     )
 
-    def __repr__(self) -> str:
-        return f"<PatientNote(id={self.id}, patient_id={self.patient_id}, type='{self.note_type}')>"
+
+class PatientNoteBase(BaseModel):
+    """Base patient note schema."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(..., min_length=1)
+    note_type: str = Field(..., min_length=1, max_length=50)
+    is_confidential: bool = False
+
+
+class PatientNoteCreate(PatientNoteBase):
+    """Patient note creation schema."""
+
+    pass
+
+
+class PatientNoteUpdate(BaseModel):
+    """Patient note update schema."""
+
+    title: str | None = Field(None, min_length=1, max_length=200)
+    content: str | None = Field(None, min_length=1)
+    note_type: str | None = Field(None, min_length=1, max_length=50)
+    is_confidential: bool | None = None
+
+
+class PatientNote(PatientNoteBase):
+    """Patient note response schema."""
+
+    id: int
+    patient_id: int
+    author_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PatientNoteList(BaseModel):
+    """Patient note list response schema."""
+
+    notes: list[PatientNote]
+    total: int
+    page: int
+    size: int

@@ -1,1077 +1,1319 @@
-import os
-import uuid
-import random
-import socket
-from collections.abc import Mapping
-from datetime import datetime, timezone
-from importlib import import_module
-from typing import TYPE_CHECKING, List, Dict, cast, overload
-import warnings
+"""nbclient implementation."""
+from __future__ import annotations
 
-import sentry_sdk
-from sentry_sdk._compat import PY37, check_uwsgi_thread_support
-from sentry_sdk.utils import (
-    AnnotatedValue,
-    ContextVar,
-    capture_internal_exceptions,
-    current_stacktrace,
-    env_to_bool,
-    format_timestamp,
-    get_sdk_name,
-    get_type_name,
-    get_default_release,
-    handle_in_app,
-    is_gevent,
-    logger,
+import asyncio
+import atexit
+import base64
+import collections
+import datetime
+import re
+import signal
+import typing as t
+from contextlib import asynccontextmanager, contextmanager
+from queue import Empty
+from textwrap import dedent
+from time import monotonic
+
+from jupyter_client.client import KernelClient
+from jupyter_client.manager import KernelManager
+from nbformat import NotebookNode
+from nbformat.v4 import output_from_msg
+from traitlets import Any, Bool, Callable, Dict, Enum, Integer, List, Type, Unicode, default
+from traitlets.config.configurable import LoggingConfigurable
+
+from .exceptions import (
+    CellControlSignal,
+    CellExecutionComplete,
+    CellExecutionError,
+    CellTimeoutError,
+    DeadKernelError,
 )
-from sentry_sdk.serializer import serialize
-from sentry_sdk.tracing import trace
-from sentry_sdk.transport import BaseHttpTransport, make_transport
-from sentry_sdk.consts import (
-    SPANDATA,
-    DEFAULT_MAX_VALUE_LENGTH,
-    DEFAULT_OPTIONS,
-    INSTRUMENTER,
-    VERSION,
-    ClientConstructor,
-)
-from sentry_sdk.integrations import _DEFAULT_INTEGRATIONS, setup_integrations
-from sentry_sdk.integrations.dedupe import DedupeIntegration
-from sentry_sdk.sessions import SessionFlusher
-from sentry_sdk.envelope import Envelope
-from sentry_sdk.profiler.continuous_profiler import setup_continuous_profiler
-from sentry_sdk.profiler.transaction_profiler import (
-    has_profiling_enabled,
-    Profile,
-    setup_profiler,
-)
-from sentry_sdk.scrubber import EventScrubber
-from sentry_sdk.monitor import Monitor
-from sentry_sdk.spotlight import setup_spotlight
+from .output_widget import OutputWidget
+from .util import ensure_async, run_hook, run_sync
 
-if TYPE_CHECKING:
-    from typing import Any
-    from typing import Callable
-    from typing import Optional
-    from typing import Sequence
-    from typing import Type
-    from typing import Union
-    from typing import TypeVar
+_RGX_CARRIAGERETURN = re.compile(r".*\r(?=[^\n])")
+_RGX_BACKSPACE = re.compile(r"[^\n]\b")
 
-    from sentry_sdk._types import Event, Hint, SDKInfo, Log
-    from sentry_sdk.integrations import Integration
-    from sentry_sdk.metrics import MetricsAggregator
-    from sentry_sdk.scope import Scope
-    from sentry_sdk.session import Session
-    from sentry_sdk.spotlight import SpotlightClient
-    from sentry_sdk.transport import Transport
-    from sentry_sdk._log_batcher import LogBatcher
-
-    I = TypeVar("I", bound=Integration)  # noqa: E741
-
-_client_init_debug = ContextVar("client_init_debug")
+# mypy: disable-error-code="no-untyped-call"
 
 
-SDK_INFO = {
-    "name": "sentry.python",  # SDK name will be overridden after integrations have been loaded with sentry_sdk.integrations.setup_integrations()
-    "version": VERSION,
-    "packages": [{"name": "pypi:sentry-sdk", "version": VERSION}],
-}  # type: SDKInfo
-
-
-def _get_options(*args, **kwargs):
-    # type: (*Optional[str], **Any) -> Dict[str, Any]
-    if args and (isinstance(args[0], (bytes, str)) or args[0] is None):
-        dsn = args[0]  # type: Optional[str]
-        args = args[1:]
-    else:
-        dsn = None
-
-    if len(args) > 1:
-        raise TypeError("Only single positional argument is expected")
-
-    rv = dict(DEFAULT_OPTIONS)
-    options = dict(*args, **kwargs)
-    if dsn is not None and options.get("dsn") is None:
-        options["dsn"] = dsn
-
-    for key, value in options.items():
-        if key not in rv:
-            raise TypeError("Unknown option %r" % (key,))
-
-        rv[key] = value
-
-    if rv["dsn"] is None:
-        rv["dsn"] = os.environ.get("SENTRY_DSN")
-
-    if rv["release"] is None:
-        rv["release"] = get_default_release()
-
-    if rv["environment"] is None:
-        rv["environment"] = os.environ.get("SENTRY_ENVIRONMENT") or "production"
-
-    if rv["debug"] is None:
-        rv["debug"] = env_to_bool(os.environ.get("SENTRY_DEBUG"), strict=True) or False
-
-    if rv["server_name"] is None and hasattr(socket, "gethostname"):
-        rv["server_name"] = socket.gethostname()
-
-    if rv["instrumenter"] is None:
-        rv["instrumenter"] = INSTRUMENTER.SENTRY
-
-    if rv["project_root"] is None:
-        try:
-            project_root = os.getcwd()
-        except Exception:
-            project_root = None
-
-        rv["project_root"] = project_root
-
-    if rv["enable_tracing"] is True and rv["traces_sample_rate"] is None:
-        rv["traces_sample_rate"] = 1.0
-
-    if rv["event_scrubber"] is None:
-        rv["event_scrubber"] = EventScrubber(
-            send_default_pii=(
-                False if rv["send_default_pii"] is None else rv["send_default_pii"]
-            )
-        )
-
-    if rv["socket_options"] and not isinstance(rv["socket_options"], list):
-        logger.warning(
-            "Ignoring socket_options because of unexpected format. See urllib3.HTTPConnection.socket_options for the expected format."
-        )
-        rv["socket_options"] = None
-
-    if rv["keep_alive"] is None:
-        rv["keep_alive"] = (
-            env_to_bool(os.environ.get("SENTRY_KEEP_ALIVE"), strict=True) or False
-        )
-
-    if rv["enable_tracing"] is not None:
-        warnings.warn(
-            "The `enable_tracing` parameter is deprecated. Please use `traces_sample_rate` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-    return rv
-
-
-try:
-    # Python 3.6+
-    module_not_found_error = ModuleNotFoundError
-except Exception:
-    # Older Python versions
-    module_not_found_error = ImportError  # type: ignore
-
-
-class BaseClient:
-    """
-    .. versionadded:: 2.0.0
-
-    The basic definition of a client that is used for sending data to Sentry.
-    """
-
-    spotlight = None  # type: Optional[SpotlightClient]
-
-    def __init__(self, options=None):
-        # type: (Optional[Dict[str, Any]]) -> None
-        self.options = (
-            options if options is not None else DEFAULT_OPTIONS
-        )  # type: Dict[str, Any]
-
-        self.transport = None  # type: Optional[Transport]
-        self.monitor = None  # type: Optional[Monitor]
-        self.metrics_aggregator = None  # type: Optional[MetricsAggregator]
-        self.log_batcher = None  # type: Optional[LogBatcher]
-
-    def __getstate__(self, *args, **kwargs):
-        # type: (*Any, **Any) -> Any
-        return {"options": {}}
-
-    def __setstate__(self, *args, **kwargs):
-        # type: (*Any, **Any) -> None
-        pass
-
-    @property
-    def dsn(self):
-        # type: () -> Optional[str]
-        return None
-
-    def should_send_default_pii(self):
-        # type: () -> bool
-        return False
-
-    def is_active(self):
-        # type: () -> bool
-        """
-        .. versionadded:: 2.0.0
-
-        Returns whether the client is active (able to send data to Sentry)
-        """
-        return False
-
-    def capture_event(self, *args, **kwargs):
-        # type: (*Any, **Any) -> Optional[str]
-        return None
-
-    def _capture_experimental_log(self, log):
-        # type: (Log) -> None
-        pass
-
-    def capture_session(self, *args, **kwargs):
-        # type: (*Any, **Any) -> None
-        return None
-
-    if TYPE_CHECKING:
-
-        @overload
-        def get_integration(self, name_or_class):
-            # type: (str) -> Optional[Integration]
-            ...
-
-        @overload
-        def get_integration(self, name_or_class):
-            # type: (type[I]) -> Optional[I]
-            ...
-
-    def get_integration(self, name_or_class):
-        # type: (Union[str, type[Integration]]) -> Optional[Integration]
-        return None
-
-    def close(self, *args, **kwargs):
-        # type: (*Any, **Any) -> None
-        return None
-
-    def flush(self, *args, **kwargs):
-        # type: (*Any, **Any) -> None
-        return None
-
-    def __enter__(self):
-        # type: () -> BaseClient
-        return self
-
-    def __exit__(self, exc_type, exc_value, tb):
-        # type: (Any, Any, Any) -> None
-        return None
-
-
-class NonRecordingClient(BaseClient):
-    """
-    .. versionadded:: 2.0.0
-
-    A client that does not send any events to Sentry. This is used as a fallback when the Sentry SDK is not yet initialized.
-    """
-
-    pass
-
-
-class _Client(BaseClient):
-    """
-    The client is internally responsible for capturing the events and
-    forwarding them to sentry through the configured transport.  It takes
-    the client options as keyword arguments and optionally the DSN as first
-    argument.
-
-    Alias of :py:class:`sentry_sdk.Client`. (Was created for better intelisense support)
-    """
-
-    def __init__(self, *args, **kwargs):
-        # type: (*Any, **Any) -> None
-        super(_Client, self).__init__(options=get_options(*args, **kwargs))
-        self._init_impl()
-
-    def __getstate__(self):
-        # type: () -> Any
-        return {"options": self.options}
-
-    def __setstate__(self, state):
-        # type: (Any) -> None
-        self.options = state["options"]
-        self._init_impl()
-
-    def _setup_instrumentation(self, functions_to_trace):
-        # type: (Sequence[Dict[str, str]]) -> None
-        """
-        Instruments the functions given in the list `functions_to_trace` with the `@sentry_sdk.tracing.trace` decorator.
-        """
-        for function in functions_to_trace:
-            class_name = None
-            function_qualname = function["qualified_name"]
-            module_name, function_name = function_qualname.rsplit(".", 1)
-
+def timestamp(msg: dict[str, t.Any] | None = None) -> str:
+    """Get the timestamp for a message."""
+    if msg and "header" in msg:  # The test mocks don't provide a header, so tolerate that
+        msg_header = msg["header"]
+        if "date" in msg_header and isinstance(msg_header["date"], datetime.datetime):
             try:
-                # Try to import module and function
-                # ex: "mymodule.submodule.funcname"
-
-                module_obj = import_module(module_name)
-                function_obj = getattr(module_obj, function_name)
-                setattr(module_obj, function_name, trace(function_obj))
-                logger.debug("Enabled tracing for %s", function_qualname)
-            except module_not_found_error:
-                try:
-                    # Try to import a class
-                    # ex: "mymodule.submodule.MyClassName.member_function"
-
-                    module_name, class_name = module_name.rsplit(".", 1)
-                    module_obj = import_module(module_name)
-                    class_obj = getattr(module_obj, class_name)
-                    function_obj = getattr(class_obj, function_name)
-                    function_type = type(class_obj.__dict__[function_name])
-                    traced_function = trace(function_obj)
-
-                    if function_type in (staticmethod, classmethod):
-                        traced_function = staticmethod(traced_function)
-
-                    setattr(class_obj, function_name, traced_function)
-                    setattr(module_obj, class_name, class_obj)
-                    logger.debug("Enabled tracing for %s", function_qualname)
-
-                except Exception as e:
-                    logger.warning(
-                        "Can not enable tracing for '%s'. (%s) Please check your `functions_to_trace` parameter.",
-                        function_qualname,
-                        e,
-                    )
-
-            except Exception as e:
-                logger.warning(
-                    "Can not enable tracing for '%s'. (%s) Please check your `functions_to_trace` parameter.",
-                    function_qualname,
-                    e,
+                # reformat datetime into expected format
+                formatted_time = datetime.datetime.strftime(
+                    msg_header["date"], "%Y-%m-%dT%H:%M:%S.%fZ"
                 )
+                if (
+                    formatted_time
+                ):  # docs indicate strftime may return empty string, so let's catch that too
+                    return formatted_time
+            except Exception:  # noqa
+                pass  # fallback to a local time
 
-    def _init_impl(self):
-        # type: () -> None
-        old_debug = _client_init_debug.get(False)
+    return datetime.datetime.utcnow().isoformat() + "Z"
 
-        def _capture_envelope(envelope):
-            # type: (Envelope) -> None
-            if self.transport is not None:
-                self.transport.capture_envelope(envelope)
+
+class NotebookClient(LoggingConfigurable):
+    """
+    Encompasses a Client for executing cells in a notebook
+    """
+
+    timeout = Integer(
+        None,
+        allow_none=True,
+        help=dedent(
+            """
+            The time to wait (in seconds) for output from executions.
+            If a cell execution takes longer, a TimeoutError is raised.
+
+            ``None`` or ``-1`` will disable the timeout. If ``timeout_func`` is set,
+            it overrides ``timeout``.
+            """
+        ),
+    ).tag(config=True)
+
+    timeout_func: t.Callable[..., int | None] | None = Any(  # type:ignore[assignment]
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            A callable which, when given the cell source as input,
+            returns the time to wait (in seconds) for output from cell
+            executions. If a cell execution takes longer, a TimeoutError
+            is raised.
+
+            Returning ``None`` or ``-1`` will disable the timeout for the cell.
+            Not setting ``timeout_func`` will cause the client to
+            default to using the ``timeout`` trait for all cells. The
+            ``timeout_func`` trait overrides ``timeout`` if it is not ``None``.
+            """
+        ),
+    ).tag(config=True)
+
+    interrupt_on_timeout = Bool(
+        False,
+        help=dedent(
+            """
+            If execution of a cell times out, interrupt the kernel and
+            continue executing other cells rather than throwing an error and
+            stopping.
+            """
+        ),
+    ).tag(config=True)
+
+    error_on_timeout = Dict(
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            If a cell execution was interrupted after a timeout, don't wait for
+            the execute_reply from the kernel (e.g. KeyboardInterrupt error).
+            Instead, return an execute_reply with the given error, which should
+            be of the following form::
+
+                {
+                    'ename': str,  # Exception name, as a string
+                    'evalue': str,  # Exception value, as a string
+                    'traceback': list(str),  # traceback frames, as strings
+                }
+            """
+        ),
+    ).tag(config=True)
+
+    startup_timeout = Integer(
+        60,
+        help=dedent(
+            """
+            The time to wait (in seconds) for the kernel to start.
+            If kernel startup takes longer, a RuntimeError is
+            raised.
+            """
+        ),
+    ).tag(config=True)
+
+    allow_errors = Bool(
+        False,
+        help=dedent(
+            """
+            If ``False`` (default), when a cell raises an error the
+            execution is stopped and a ``CellExecutionError``
+            is raised, except if the error name is in
+            ``allow_error_names``.
+            If ``True``, execution errors are ignored and the execution
+            is continued until the end of the notebook. Output from
+            exceptions is included in the cell output in both cases.
+            """
+        ),
+    ).tag(config=True)
+
+    allow_error_names = List(
+        Unicode(),
+        help=dedent(
+            """
+            List of error names which won't stop the execution. Use this if the
+            ``allow_errors`` option it too general and you want to allow only
+            specific kinds of errors.
+            """
+        ),
+    ).tag(config=True)
+
+    force_raise_errors = Bool(
+        False,
+        help=dedent(
+            """
+            If False (default), errors from executing the notebook can be
+            allowed with a ``raises-exception`` tag on a single cell, or the
+            ``allow_errors`` or ``allow_error_names`` configurable options for
+            all cells. An allowed error will be recorded in notebook output, and
+            execution will continue. If an error occurs when it is not
+            explicitly allowed, a ``CellExecutionError`` will be raised.
+            If True, ``CellExecutionError`` will be raised for any error that occurs
+            while executing the notebook. This overrides the ``allow_errors``
+            and ``allow_error_names`` options and the ``raises-exception`` cell
+            tag.
+            """
+        ),
+    ).tag(config=True)
+
+    skip_cells_with_tag = Unicode(
+        "skip-execution",
+        help=dedent(
+            """
+            Name of the cell tag to use to denote a cell that should be skipped.
+            """
+        ),
+    ).tag(config=True)
+
+    extra_arguments = List(Unicode()).tag(config=True)
+
+    kernel_name = Unicode(
+        "",
+        help=dedent(
+            """
+            Name of kernel to use to execute the cells.
+            If not set, use the kernel_spec embedded in the notebook.
+            """
+        ),
+    ).tag(config=True)
+
+    raise_on_iopub_timeout = Bool(
+        False,
+        help=dedent(
+            """
+            If ``False`` (default), then the kernel will continue waiting for
+            iopub messages until it receives a kernel idle message, or until a
+            timeout occurs, at which point the currently executing cell will be
+            skipped. If ``True``, then an error will be raised after the first
+            timeout. This option generally does not need to be used, but may be
+            useful in contexts where there is the possibility of executing
+            notebooks with memory-consuming infinite loops.
+            """
+        ),
+    ).tag(config=True)
+
+    store_widget_state = Bool(
+        True,
+        help=dedent(
+            """
+            If ``True`` (default), then the state of the Jupyter widgets created
+            at the kernel will be stored in the metadata of the notebook.
+            """
+        ),
+    ).tag(config=True)
+
+    record_timing = Bool(
+        True,
+        help=dedent(
+            """
+            If ``True`` (default), then the execution timings of each cell will
+            be stored in the metadata of the notebook.
+            """
+        ),
+    ).tag(config=True)
+
+    iopub_timeout = Integer(
+        4,
+        allow_none=False,
+        help=dedent(
+            """
+            The time to wait (in seconds) for IOPub output. This generally
+            doesn't need to be set, but on some slow networks (such as CI
+            systems) the default timeout might not be long enough to get all
+            messages.
+            """
+        ),
+    ).tag(config=True)
+
+    shell_timeout_interval = Integer(
+        5,
+        allow_none=False,
+        help=dedent(
+            """
+            The time to wait (in seconds) for Shell output before retrying.
+            This generally doesn't need to be set, but if one needs to check
+            for dead kernels at a faster rate this can help.
+            """
+        ),
+    ).tag(config=True)
+
+    shutdown_kernel = Enum(
+        ["graceful", "immediate"],
+        default_value="graceful",
+        help=dedent(
+            """
+            If ``graceful`` (default), then the kernel is given time to clean
+            up after executing all cells, e.g., to execute its ``atexit`` hooks.
+            If ``immediate``, then the kernel is signaled to immediately
+            terminate.
+            """
+        ),
+    ).tag(config=True)
+
+    ipython_hist_file = Unicode(
+        default_value=":memory:",
+        help="""Path to file to use for SQLite history database for an IPython kernel.
+
+        The specific value ``:memory:`` (including the colon
+        at both end but not the back ticks), avoids creating a history file. Otherwise, IPython
+        will create a history file for each kernel.
+
+        When running kernels simultaneously (e.g. via multiprocessing) saving history a single
+        SQLite file can result in database errors, so using ``:memory:`` is recommended in
+        non-interactive contexts.
+        """,
+    ).tag(config=True)
+
+    kernel_manager_class = Type(
+        config=True, klass=KernelManager, help="The kernel manager class to use."
+    )
+
+    on_notebook_start = Callable(
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            A callable which executes after the kernel manager and kernel client are setup, and
+            cells are about to execute.
+            Called with kwargs ``notebook``.
+            """
+        ),
+    ).tag(config=True)
+
+    on_notebook_complete = Callable(
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            A callable which executes after the kernel is cleaned up.
+            Called with kwargs ``notebook``.
+            """
+        ),
+    ).tag(config=True)
+
+    on_notebook_error = Callable(
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            A callable which executes when the notebook encounters an error.
+            Called with kwargs ``notebook``.
+            """
+        ),
+    ).tag(config=True)
+
+    on_cell_start = Callable(
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            A callable which executes before a cell is executed and before non-executing cells
+            are skipped.
+            Called with kwargs ``cell`` and ``cell_index``.
+            """
+        ),
+    ).tag(config=True)
+
+    on_cell_execute = Callable(
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            A callable which executes just before a code cell is executed.
+            Called with kwargs ``cell`` and ``cell_index``.
+            """
+        ),
+    ).tag(config=True)
+
+    on_cell_complete = Callable(
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            A callable which executes after a cell execution is complete. It is
+            called even when a cell results in a failure.
+            Called with kwargs ``cell`` and ``cell_index``.
+            """
+        ),
+    ).tag(config=True)
+
+    on_cell_executed = Callable(
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            A callable which executes just after a code cell is executed, whether
+            or not it results in an error.
+            Called with kwargs ``cell``, ``cell_index`` and ``execute_reply``.
+            """
+        ),
+    ).tag(config=True)
+
+    on_cell_error = Callable(
+        default_value=None,
+        allow_none=True,
+        help=dedent(
+            """
+            A callable which executes when a cell execution results in an error.
+            This is executed even if errors are suppressed with ``cell_allows_errors``.
+            Called with kwargs ``cell`, ``cell_index`` and ``execute_reply``.
+            """
+        ),
+    ).tag(config=True)
+
+    @default("kernel_manager_class")
+    def _kernel_manager_class_default(self) -> type[KernelManager]:
+        """Use a dynamic default to avoid importing jupyter_client at startup"""
+        from jupyter_client import AsyncKernelManager  # type:ignore[attr-defined]
+
+        return AsyncKernelManager
+
+    _display_id_map: dict[str, t.Any] = Dict(  # type:ignore[assignment]
+        help=dedent(
+            """
+              mapping of locations of outputs with a given display_id
+              tracks cell index and output index within cell.outputs for
+              each appearance of the display_id
+              {
+                   'display_id': {
+                  cell_idx: [output_idx,]
+                   }
+              }
+              """
+        )
+    )
+
+    display_data_priority = List(
+        [
+            "text/html",
+            "application/pdf",
+            "text/latex",
+            "image/svg+xml",
+            "image/png",
+            "image/jpeg",
+            "text/markdown",
+            "text/plain",
+        ],
+        help="""
+            An ordered list of preferred output type, the first
+            encountered will usually be used when converting discarding
+            the others.
+            """,
+    ).tag(config=True)
+
+    resources: dict[str, t.Any] = Dict(  # type:ignore[assignment]
+        help=dedent(
+            """
+            Additional resources used in the conversion process. For example,
+            passing ``{'metadata': {'path': run_path}}`` sets the
+            execution path to ``run_path``.
+            """
+        )
+    )
+
+    coalesce_streams = Bool(
+        help=dedent(
+            """
+            Merge all stream outputs with shared names into single streams.
+            """
+        )
+    )
+
+    def __init__(self, nb: NotebookNode, km: KernelManager | None = None, **kw: t.Any) -> None:
+        """Initializes the execution manager.
+
+        Parameters
+        ----------
+        nb : NotebookNode
+            Notebook being executed.
+        km : KernelManager (optional)
+            Optional kernel manager. If none is provided, a kernel manager will
+            be created.
+        """
+        super().__init__(**kw)
+        self.nb: NotebookNode = nb
+        self.km: KernelManager | None = km
+        self.owns_km: bool = km is None  # whether the NotebookClient owns the kernel manager
+        self.kc: KernelClient | None = None
+        self.reset_execution_trackers()
+        self.widget_registry: dict[str, dict[str, t.Any]] = {
+            "@jupyter-widgets/output": {"OutputModel": OutputWidget}
+        }
+        # comm_open_handlers should return an object with a .handle_msg(msg) method or None
+        self.comm_open_handlers: dict[str, t.Any] = {
+            "jupyter.widget": self.on_comm_open_jupyter_widget
+        }
+
+    def reset_execution_trackers(self) -> None:
+        """Resets any per-execution trackers."""
+        self.task_poll_for_reply: asyncio.Future[t.Any] | None = None
+        self.code_cells_executed = 0
+        self._display_id_map = {}
+        self.widget_state: dict[str, dict[str, t.Any]] = {}
+        self.widget_buffers: dict[str, dict[tuple[str, ...], dict[str, str]]] = {}
+        # maps to list of hooks, where the last is used, this is used
+        # to support nested use of output widgets.
+        self.output_hook_stack: t.Any = collections.defaultdict(list)
+        # our front-end mimicking Output widgets
+        self.comm_objects: dict[str, t.Any] = {}
+
+    def create_kernel_manager(self) -> KernelManager:
+        """Creates a new kernel manager.
+
+        Returns
+        -------
+        km : KernelManager
+            Kernel manager whose client class is asynchronous.
+        """
+        if not self.kernel_name:
+            kn = self.nb.metadata.get("kernelspec", {}).get("name")
+            if kn is not None:
+                self.kernel_name = kn
+
+        if not self.kernel_name:
+            self.km = self.kernel_manager_class(config=self.config)
+        else:
+            self.km = self.kernel_manager_class(kernel_name=self.kernel_name, config=self.config)
+        assert self.km is not None
+        return self.km
+
+    async def _async_cleanup_kernel(self) -> None:
+        assert self.km is not None
+        now = self.shutdown_kernel == "immediate"
+        try:
+            # Queue the manager to kill the process, and recover gracefully if it's already dead.
+            if await ensure_async(self.km.is_alive()):
+                await ensure_async(self.km.shutdown_kernel(now=now))
+        except RuntimeError as e:
+            # The error isn't specialized, so we have to check the message
+            if "No kernel is running!" not in str(e):
+                raise
+        finally:
+            # Remove any state left over even if we failed to stop the kernel
+            await ensure_async(self.km.cleanup_resources())
+            if getattr(self, "kc", None) and self.kc is not None:
+                await ensure_async(self.kc.stop_channels())  # type:ignore[func-returns-value]
+                self.kc = None
+                self.km = None
+
+    _cleanup_kernel = run_sync(_async_cleanup_kernel)
+
+    async def async_start_new_kernel(self, **kwargs: t.Any) -> None:
+        """Creates a new kernel.
+
+        Parameters
+        ----------
+        kwargs :
+            Any options for ``self.kernel_manager_class.start_kernel()``. Because
+            that defaults to AsyncKernelManager, this will likely include options
+            accepted by ``AsyncKernelManager.start_kernel()``, which includes ``cwd``.
+        """
+        assert self.km is not None
+        resource_path = self.resources.get("metadata", {}).get("path") or None
+        if resource_path and "cwd" not in kwargs:
+            kwargs["cwd"] = resource_path
+
+        has_history_manager_arg = any(
+            arg.startswith("--HistoryManager.hist_file") for arg in self.extra_arguments
+        )
+        if (
+            hasattr(self.km, "ipykernel")
+            and self.km.ipykernel
+            and self.ipython_hist_file
+            and not has_history_manager_arg
+        ):
+            self.extra_arguments += [f"--HistoryManager.hist_file={self.ipython_hist_file}"]
+
+        await ensure_async(self.km.start_kernel(extra_arguments=self.extra_arguments, **kwargs))
+
+    start_new_kernel = run_sync(async_start_new_kernel)
+
+    async def async_start_new_kernel_client(self) -> KernelClient:
+        """Creates a new kernel client.
+
+        Returns
+        -------
+        kc : KernelClient
+            Kernel client as created by the kernel manager ``km``.
+        """
+        assert self.km is not None
+        try:
+            self.kc = self.km.client()
+            await ensure_async(self.kc.start_channels())  # type:ignore[func-returns-value]
+            await ensure_async(self.kc.wait_for_ready(timeout=self.startup_timeout))
+        except Exception as e:
+            self.log.error(
+                "Error occurred while starting new kernel client for kernel {}: {}".format(
+                    getattr(self.km, "kernel_id", None), str(e)
+                )
+            )
+            await self._async_cleanup_kernel()
+            raise
+        self.kc.allow_stdin = False
+        await run_hook(self.on_notebook_start, notebook=self.nb)
+        return self.kc
+
+    start_new_kernel_client = run_sync(async_start_new_kernel_client)
+
+    @contextmanager
+    def setup_kernel(self, **kwargs: t.Any) -> t.Generator[None, None, None]:
+        """
+        Context manager for setting up the kernel to execute a notebook.
+
+        The assigns the Kernel Manager (``self.km``) if missing and Kernel Client(``self.kc``).
+
+        When control returns from the yield it stops the client's zmq channels, and shuts
+        down the kernel.
+        """
+        # by default, cleanup the kernel client if we own the kernel manager
+        # and keep it alive if we don't
+        cleanup_kc = kwargs.pop("cleanup_kc", self.owns_km)
+
+        # Can't use run_until_complete on an asynccontextmanager function :(
+        if self.km is None:
+            self.km = self.create_kernel_manager()
+
+        if not self.km.has_kernel:
+            self.start_new_kernel(**kwargs)
+
+        if self.kc is None:
+            self.start_new_kernel_client()
 
         try:
-            _client_init_debug.set(self.options["debug"])
-            self.transport = make_transport(self.options)
-
-            self.monitor = None
-            if self.transport:
-                if self.options["enable_backpressure_handling"]:
-                    self.monitor = Monitor(self.transport)
-
-            self.session_flusher = SessionFlusher(capture_func=_capture_envelope)
-
-            self.metrics_aggregator = None  # type: Optional[MetricsAggregator]
-            experiments = self.options.get("_experiments", {})
-            if experiments.get("enable_metrics", True):
-                # Context vars are not working correctly on Python <=3.6
-                # with gevent.
-                metrics_supported = not is_gevent() or PY37
-                if metrics_supported:
-                    from sentry_sdk.metrics import MetricsAggregator
-
-                    self.metrics_aggregator = MetricsAggregator(
-                        capture_func=_capture_envelope,
-                        enable_code_locations=bool(
-                            experiments.get("metric_code_locations", True)
-                        ),
-                    )
-                else:
-                    logger.info(
-                        "Metrics not supported on Python 3.6 and lower with gevent."
-                    )
-
-            self.log_batcher = None
-            if experiments.get("enable_logs", False):
-                from sentry_sdk._log_batcher import LogBatcher
-
-                self.log_batcher = LogBatcher(capture_func=_capture_envelope)
-
-            max_request_body_size = ("always", "never", "small", "medium")
-            if self.options["max_request_body_size"] not in max_request_body_size:
-                raise ValueError(
-                    "Invalid value for max_request_body_size. Must be one of {}".format(
-                        max_request_body_size
-                    )
-                )
-
-            if self.options["_experiments"].get("otel_powered_performance", False):
-                logger.debug(
-                    "[OTel] Enabling experimental OTel-powered performance monitoring."
-                )
-                self.options["instrumenter"] = INSTRUMENTER.OTEL
-                if (
-                    "sentry_sdk.integrations.opentelemetry.integration.OpenTelemetryIntegration"
-                    not in _DEFAULT_INTEGRATIONS
-                ):
-                    _DEFAULT_INTEGRATIONS.append(
-                        "sentry_sdk.integrations.opentelemetry.integration.OpenTelemetryIntegration",
-                    )
-
-            self.integrations = setup_integrations(
-                self.options["integrations"],
-                with_defaults=self.options["default_integrations"],
-                with_auto_enabling_integrations=self.options[
-                    "auto_enabling_integrations"
-                ],
-                disabled_integrations=self.options["disabled_integrations"],
-            )
-
-            spotlight_config = self.options.get("spotlight")
-            if spotlight_config is None and "SENTRY_SPOTLIGHT" in os.environ:
-                spotlight_env_value = os.environ["SENTRY_SPOTLIGHT"]
-                spotlight_config = env_to_bool(spotlight_env_value, strict=True)
-                self.options["spotlight"] = (
-                    spotlight_config
-                    if spotlight_config is not None
-                    else spotlight_env_value
-                )
-
-            if self.options.get("spotlight"):
-                self.spotlight = setup_spotlight(self.options)
-                if not self.options["dsn"]:
-                    sample_all = lambda *_args, **_kwargs: 1.0
-                    self.options["send_default_pii"] = True
-                    self.options["error_sampler"] = sample_all
-                    self.options["traces_sampler"] = sample_all
-                    self.options["profiles_sampler"] = sample_all
-
-            sdk_name = get_sdk_name(list(self.integrations.keys()))
-            SDK_INFO["name"] = sdk_name
-            logger.debug("Setting SDK name to '%s'", sdk_name)
-
-            if has_profiling_enabled(self.options):
-                try:
-                    setup_profiler(self.options)
-                except Exception as e:
-                    logger.debug("Can not set up profiler. (%s)", e)
-            else:
-                try:
-                    setup_continuous_profiler(
-                        self.options,
-                        sdk_info=SDK_INFO,
-                        capture_func=_capture_envelope,
-                    )
-                except Exception as e:
-                    logger.debug("Can not set up continuous profiler. (%s)", e)
-
+            yield
         finally:
-            _client_init_debug.set(old_debug)
+            if cleanup_kc:
+                self._cleanup_kernel()
 
-        self._setup_instrumentation(self.options.get("functions_to_trace", []))
-
-        if (
-            self.monitor
-            or self.metrics_aggregator
-            or self.log_batcher
-            or has_profiling_enabled(self.options)
-            or isinstance(self.transport, BaseHttpTransport)
-        ):
-            # If we have anything on that could spawn a background thread, we
-            # need to check if it's safe to use them.
-            check_uwsgi_thread_support()
-
-    def is_active(self):
-        # type: () -> bool
+    @asynccontextmanager
+    async def async_setup_kernel(self, **kwargs: t.Any) -> t.AsyncGenerator[None, None]:
         """
-        .. versionadded:: 2.0.0
+        Context manager for setting up the kernel to execute a notebook.
 
-        Returns whether the client is active (able to send data to Sentry)
+        This assigns the Kernel Manager (``self.km``) if missing and Kernel Client(``self.kc``).
+
+        When control returns from the yield it stops the client's zmq channels, and shuts
+        down the kernel.
+
+        Handlers for SIGINT and SIGTERM are also added to cleanup in case of unexpected shutdown.
         """
-        return True
+        # by default, cleanup the kernel client if we own the kernel manager
+        # and keep it alive if we don't
+        cleanup_kc = kwargs.pop("cleanup_kc", self.owns_km)
+        if self.km is None:
+            self.km = self.create_kernel_manager()
 
-    def should_send_default_pii(self):
-        # type: () -> bool
+        # self._cleanup_kernel uses run_async, which ensures the ioloop is running again.
+        # This is necessary as the ioloop has stopped once atexit fires.
+        atexit.register(self._cleanup_kernel)
+
+        def on_signal() -> None:
+            """Handle signals."""
+            self._async_cleanup_kernel_future = asyncio.ensure_future(self._async_cleanup_kernel())
+            atexit.unregister(self._cleanup_kernel)
+
+        loop = asyncio.get_event_loop()
+        try:
+            loop.add_signal_handler(signal.SIGINT, on_signal)
+            loop.add_signal_handler(signal.SIGTERM, on_signal)
+        except RuntimeError:
+            # NotImplementedError: Windows does not support signals.
+            # RuntimeError: Raised when add_signal_handler is called outside the main thread
+            pass
+
+        if not self.km.has_kernel:
+            await self.async_start_new_kernel(**kwargs)
+
+        if self.kc is None:
+            await self.async_start_new_kernel_client()
+
+        try:
+            yield
+        except RuntimeError as e:
+            await run_hook(self.on_notebook_error, notebook=self.nb)
+            raise e
+        finally:
+            if cleanup_kc:
+                await self._async_cleanup_kernel()
+            await run_hook(self.on_notebook_complete, notebook=self.nb)
+            atexit.unregister(self._cleanup_kernel)
+            try:
+                loop.remove_signal_handler(signal.SIGINT)
+                loop.remove_signal_handler(signal.SIGTERM)
+            except RuntimeError:
+                pass
+
+    async def async_execute(self, reset_kc: bool = False, **kwargs: t.Any) -> NotebookNode:
         """
-        .. versionadded:: 2.0.0
+        Executes each code cell.
 
-        Returns whether the client should send default PII (Personally Identifiable Information) data to Sentry.
+        Parameters
+        ----------
+        kwargs :
+            Any option for ``self.kernel_manager_class.start_kernel()``. Because
+            that defaults to AsyncKernelManager, this will likely include options
+            accepted by ``jupyter_client.AsyncKernelManager.start_kernel()``,
+            which includes ``cwd``.
+
+            ``reset_kc`` if True, the kernel client will be reset and a new one
+            will be created (default: False).
+
+        Returns
+        -------
+        nb : NotebookNode
+            The executed notebook.
         """
-        return self.options.get("send_default_pii") or False
+        if reset_kc and self.owns_km:
+            await self._async_cleanup_kernel()
+        self.reset_execution_trackers()
 
-    @property
-    def dsn(self):
-        # type: () -> Optional[str]
-        """Returns the configured DSN as string."""
-        return self.options["dsn"]
-
-    def _prepare_event(
-        self,
-        event,  # type: Event
-        hint,  # type: Hint
-        scope,  # type: Optional[Scope]
-    ):
-        # type: (...) -> Optional[Event]
-
-        previous_total_spans = None  # type: Optional[int]
-        previous_total_breadcrumbs = None  # type: Optional[int]
-
-        if event.get("timestamp") is None:
-            event["timestamp"] = datetime.now(timezone.utc)
-
-        if scope is not None:
-            is_transaction = event.get("type") == "transaction"
-            spans_before = len(cast(List[Dict[str, object]], event.get("spans", [])))
-            event_ = scope.apply_to_event(event, hint, self.options)
-
-            # one of the event/error processors returned None
-            if event_ is None:
-                if self.transport:
-                    self.transport.record_lost_event(
-                        "event_processor",
-                        data_category=("transaction" if is_transaction else "error"),
+        async with self.async_setup_kernel(**kwargs):
+            assert self.kc is not None
+            self.log.info("Executing notebook with kernel: %s" % self.kernel_name)
+            msg_id = await ensure_async(self.kc.kernel_info())
+            info_msg = await self.async_wait_for_reply(msg_id)
+            if info_msg is not None:
+                if "language_info" in info_msg["content"]:
+                    self.nb.metadata["language_info"] = info_msg["content"]["language_info"]
+                else:
+                    raise RuntimeError(
+                        'Kernel info received message content has no "language_info" key. '
+                        "Content is:\n" + str(info_msg["content"])
                     )
-                    if is_transaction:
-                        self.transport.record_lost_event(
-                            "event_processor",
-                            data_category="span",
-                            quantity=spans_before + 1,  # +1 for the transaction itself
-                        )
-                return None
-
-            event = event_
-            spans_delta = spans_before - len(
-                cast(List[Dict[str, object]], event.get("spans", []))
-            )
-            if is_transaction and spans_delta > 0 and self.transport is not None:
-                self.transport.record_lost_event(
-                    "event_processor", data_category="span", quantity=spans_delta
+            for index, cell in enumerate(self.nb.cells):
+                # Ignore `'execution_count' in content` as it's always 1
+                # when store_history is False
+                await self.async_execute_cell(
+                    cell, index, execution_count=self.code_cells_executed + 1
                 )
+            self.set_widgets_metadata()
 
-            dropped_spans = event.pop("_dropped_spans", 0) + spans_delta  # type: int
-            if dropped_spans > 0:
-                previous_total_spans = spans_before + dropped_spans
-            if scope._n_breadcrumbs_truncated > 0:
-                breadcrumbs = event.get("breadcrumbs", {})
-                values = (
-                    breadcrumbs.get("values", [])
-                    if not isinstance(breadcrumbs, AnnotatedValue)
-                    else []
-                )
-                previous_total_breadcrumbs = (
-                    len(values) + scope._n_breadcrumbs_truncated
-                )
+        return self.nb
 
-        if (
-            self.options["attach_stacktrace"]
-            and "exception" not in event
-            and "stacktrace" not in event
-            and "threads" not in event
-        ):
-            with capture_internal_exceptions():
-                event["threads"] = {
-                    "values": [
-                        {
-                            "stacktrace": current_stacktrace(
-                                include_local_variables=self.options.get(
-                                    "include_local_variables", True
-                                ),
-                                max_value_length=self.options.get(
-                                    "max_value_length", DEFAULT_MAX_VALUE_LENGTH
-                                ),
-                            ),
-                            "crashed": False,
-                            "current": True,
-                        }
-                    ]
+    execute = run_sync(async_execute)
+
+    def set_widgets_metadata(self) -> None:
+        """Set with widget metadata."""
+        if self.widget_state:
+            self.nb.metadata.widgets = {
+                "application/vnd.jupyter.widget-state+json": {
+                    "state": {
+                        model_id: self._serialize_widget_state(state)
+                        for model_id, state in self.widget_state.items()
+                        if "_model_name" in state
+                    },
+                    "version_major": 2,
+                    "version_minor": 0,
                 }
+            }
+            for key, widget in self.nb.metadata.widgets[
+                "application/vnd.jupyter.widget-state+json"
+            ]["state"].items():
+                buffers = self.widget_buffers.get(key)
+                if buffers:
+                    widget["buffers"] = list(buffers.values())
 
-        for key in "release", "environment", "server_name", "dist":
-            if event.get(key) is None and self.options[key] is not None:
-                event[key] = str(self.options[key]).strip()
-        if event.get("sdk") is None:
-            sdk_info = dict(SDK_INFO)
-            sdk_info["integrations"] = sorted(self.integrations.keys())
-            event["sdk"] = sdk_info
+    def _update_display_id(self, display_id: str, msg: dict[str, t.Any]) -> None:
+        """Update outputs with a given display_id"""
+        if display_id not in self._display_id_map:
+            self.log.debug("display id %r not in %s", display_id, self._display_id_map)
+            return
 
-        if event.get("platform") is None:
-            event["platform"] = "python"
+        if msg["header"]["msg_type"] == "update_display_data":
+            msg["header"]["msg_type"] = "display_data"
 
-        event = handle_in_app(
-            event,
-            self.options["in_app_exclude"],
-            self.options["in_app_include"],
-            self.options["project_root"],
-        )
+        try:
+            out = output_from_msg(msg)
+        except ValueError:
+            self.log.error(f"unhandled iopub msg: {msg['msg_type']}")
+            return
 
-        if event is not None:
-            event_scrubber = self.options["event_scrubber"]
-            if event_scrubber:
-                event_scrubber.scrub_event(event)
+        for cell_idx, output_indices in self._display_id_map[display_id].items():
+            cell = self.nb["cells"][cell_idx]
+            outputs = cell["outputs"]
+            for output_idx in output_indices:
+                outputs[output_idx]["data"] = out["data"]
+                outputs[output_idx]["metadata"] = out["metadata"]
 
-        if previous_total_spans is not None:
-            event["spans"] = AnnotatedValue(
-                event.get("spans", []), {"len": previous_total_spans}
+    async def _async_poll_for_reply(
+        self,
+        msg_id: str,
+        cell: NotebookNode,
+        timeout: int | None,
+        task_poll_output_msg: asyncio.Future[t.Any],
+        task_poll_kernel_alive: asyncio.Future[t.Any],
+    ) -> dict[str, t.Any]:
+        msg: dict[str, t.Any]
+        assert self.kc is not None
+        new_timeout: float | None = None
+        if timeout is not None:
+            deadline = monotonic() + timeout
+            new_timeout = float(timeout)
+        error_on_timeout_execute_reply = None
+        while True:
+            try:
+                if error_on_timeout_execute_reply:
+                    msg = error_on_timeout_execute_reply  # type:ignore[unreachable]
+                    msg["parent_header"] = {"msg_id": msg_id}
+                else:
+                    msg = await ensure_async(self.kc.shell_channel.get_msg(timeout=new_timeout))
+                if msg["parent_header"].get("msg_id") == msg_id:
+                    if self.record_timing:
+                        cell["metadata"]["execution"]["shell.execute_reply"] = timestamp(msg)
+                    try:
+                        await asyncio.wait_for(task_poll_output_msg, self.iopub_timeout)
+                    except (asyncio.TimeoutError, Empty):
+                        if self.raise_on_iopub_timeout:
+                            task_poll_kernel_alive.cancel()
+                            raise CellTimeoutError.error_from_timeout_and_cell(
+                                "Timeout waiting for IOPub output", self.iopub_timeout, cell
+                            ) from None
+                        else:
+                            self.log.warning("Timeout waiting for IOPub output")
+                    task_poll_kernel_alive.cancel()
+                    return msg
+                else:
+                    if new_timeout is not None:
+                        new_timeout = max(0, deadline - monotonic())
+            except Empty:
+                # received no message, check if kernel is still alive
+                assert timeout is not None
+                task_poll_kernel_alive.cancel()
+                await self._async_check_alive()
+                error_on_timeout_execute_reply = await self._async_handle_timeout(timeout, cell)
+
+    async def _async_poll_output_msg(
+        self, parent_msg_id: str, cell: NotebookNode, cell_index: int
+    ) -> None:
+        assert self.kc is not None
+        while True:
+            msg = await ensure_async(self.kc.iopub_channel.get_msg(timeout=None))
+            if msg["parent_header"].get("msg_id") == parent_msg_id:
+                try:
+                    # Will raise CellExecutionComplete when completed
+                    self.process_message(msg, cell, cell_index)
+                except CellExecutionComplete:
+                    return
+
+    async def _async_poll_kernel_alive(self) -> None:
+        while True:
+            await asyncio.sleep(1)
+            try:
+                await self._async_check_alive()
+            except DeadKernelError:
+                assert self.task_poll_for_reply is not None
+                self.task_poll_for_reply.cancel()
+                return
+
+    def _get_timeout(self, cell: NotebookNode | None) -> int | None:
+        if self.timeout_func is not None and cell is not None:
+            timeout = self.timeout_func(cell)
+        else:
+            timeout = self.timeout
+
+        if not timeout or timeout < 0:
+            timeout = None
+
+        return timeout
+
+    async def _async_handle_timeout(
+        self, timeout: int, cell: NotebookNode | None = None
+    ) -> None | dict[str, t.Any]:
+        self.log.error("Timeout waiting for execute reply (%is)." % timeout)
+        if self.interrupt_on_timeout:
+            self.log.error("Interrupting kernel")
+            assert self.km is not None
+            await ensure_async(self.km.interrupt_kernel())
+            if self.error_on_timeout:
+                execute_reply = {"content": {**self.error_on_timeout, "status": "error"}}
+                return execute_reply
+            return None
+        else:
+            assert cell is not None
+            raise CellTimeoutError.error_from_timeout_and_cell(
+                "Cell execution timed out", timeout, cell
             )
-        if previous_total_breadcrumbs is not None:
-            event["breadcrumbs"] = AnnotatedValue(
-                event.get("breadcrumbs", []), {"len": previous_total_breadcrumbs}
-            )
-        # Postprocess the event here so that annotated types do
-        # generally not surface in before_send
-        if event is not None:
-            event = cast(
-                "Event",
-                serialize(
-                    cast("Dict[str, Any]", event),
-                    max_request_body_size=self.options.get("max_request_body_size"),
-                    max_value_length=self.options.get("max_value_length"),
-                    custom_repr=self.options.get("custom_repr"),
-                ),
-            )
 
-        before_send = self.options["before_send"]
-        if (
-            before_send is not None
-            and event is not None
-            and event.get("type") != "transaction"
-        ):
-            new_event = None
-            with capture_internal_exceptions():
-                new_event = before_send(event, hint or {})
-            if new_event is None:
-                logger.info("before send dropped event")
-                if self.transport:
-                    self.transport.record_lost_event(
-                        "before_send", data_category="error"
-                    )
+    async def _async_check_alive(self) -> None:
+        assert self.kc is not None
+        if not await ensure_async(self.kc.is_alive()):  # type:ignore[attr-defined]
+            self.log.error("Kernel died while waiting for execute reply.")
+            raise DeadKernelError("Kernel died")
 
-                # If this is an exception, reset the DedupeIntegration. It still
-                # remembers the dropped exception as the last exception, meaning
-                # that if the same exception happens again and is not dropped
-                # in before_send, it'd get dropped by DedupeIntegration.
-                if event.get("exception"):
-                    DedupeIntegration.reset_last_seen()
-
-            event = new_event
-
-        before_send_transaction = self.options["before_send_transaction"]
-        if (
-            before_send_transaction is not None
-            and event is not None
-            and event.get("type") == "transaction"
-        ):
-            new_event = None
-            spans_before = len(cast(List[Dict[str, object]], event.get("spans", [])))
-            with capture_internal_exceptions():
-                new_event = before_send_transaction(event, hint or {})
-            if new_event is None:
-                logger.info("before send transaction dropped event")
-                if self.transport:
-                    self.transport.record_lost_event(
-                        reason="before_send", data_category="transaction"
-                    )
-                    self.transport.record_lost_event(
-                        reason="before_send",
-                        data_category="span",
-                        quantity=spans_before + 1,  # +1 for the transaction itself
-                    )
+    async def async_wait_for_reply(
+        self, msg_id: str, cell: NotebookNode | None = None
+    ) -> dict[str, t.Any] | None:
+        """Wait for a message reply."""
+        assert self.kc is not None
+        # wait for finish, with timeout
+        timeout = self._get_timeout(cell)
+        cummulative_time = 0
+        while True:
+            try:
+                msg: dict[str, t.Any] = await ensure_async(
+                    self.kc.shell_channel.get_msg(timeout=self.shell_timeout_interval)
+                )
+            except Empty:
+                await self._async_check_alive()
+                cummulative_time += self.shell_timeout_interval
+                if timeout and cummulative_time > timeout:
+                    await self._async_handle_timeout(timeout, cell)
+                    break
             else:
-                spans_delta = spans_before - len(new_event.get("spans", []))
-                if spans_delta > 0 and self.transport is not None:
-                    self.transport.record_lost_event(
-                        reason="before_send", data_category="span", quantity=spans_delta
-                    )
+                if msg["parent_header"].get("msg_id") == msg_id:
+                    return msg
+        return None
 
-            event = new_event
+    wait_for_reply = run_sync(async_wait_for_reply)
+    # Backwards compatibility naming for papermill
+    _wait_for_reply = wait_for_reply
 
-        return event
-
-    def _is_ignored_error(self, event, hint):
-        # type: (Event, Hint) -> bool
-        exc_info = hint.get("exc_info")
-        if exc_info is None:
-            return False
-
-        error = exc_info[0]
-        error_type_name = get_type_name(exc_info[0])
-        error_full_name = "%s.%s" % (exc_info[0].__module__, error_type_name)
-
-        for ignored_error in self.options["ignore_errors"]:
-            # String types are matched against the type name in the
-            # exception only
-            if isinstance(ignored_error, str):
-                if ignored_error == error_full_name or ignored_error == error_type_name:
-                    return True
-            else:
-                if issubclass(error, ignored_error):
-                    return True
-
+    def _passed_deadline(self, deadline: int | None) -> bool:
+        if deadline is not None and deadline - monotonic() <= 0:
+            return True
         return False
 
-    def _should_capture(
+    async def _check_raise_for_error(
+        self, cell: NotebookNode, cell_index: int, exec_reply: dict[str, t.Any] | None
+    ) -> None:
+        if exec_reply is None:
+            return None
+
+        exec_reply_content = exec_reply["content"]
+        if exec_reply_content["status"] != "error":
+            return None
+
+        cell_allows_errors = (not self.force_raise_errors) and (
+            self.allow_errors
+            or exec_reply_content.get("ename") in self.allow_error_names
+            or "raises-exception" in cell.metadata.get("tags", [])
+        )
+        await run_hook(
+            self.on_cell_error, cell=cell, cell_index=cell_index, execute_reply=exec_reply
+        )
+        if not cell_allows_errors:
+            raise CellExecutionError.from_cell_and_msg(cell, exec_reply_content)
+
+    async def async_execute_cell(
         self,
-        event,  # type: Event
-        hint,  # type: Hint
-        scope=None,  # type: Optional[Scope]
-    ):
-        # type: (...) -> bool
-        # Transactions are sampled independent of error events.
-        is_transaction = event.get("type") == "transaction"
-        if is_transaction:
-            return True
+        cell: NotebookNode,
+        cell_index: int,
+        execution_count: int | None = None,
+        store_history: bool = True,
+    ) -> NotebookNode:
+        """
+        Executes a single code cell.
 
-        ignoring_prevents_recursion = scope is not None and not scope._should_capture
-        if ignoring_prevents_recursion:
-            return False
+        To execute all cells see :meth:`execute`.
 
-        ignored_by_config_option = self._is_ignored_error(event, hint)
-        if ignored_by_config_option:
-            return False
+        Parameters
+        ----------
+        cell : nbformat.NotebookNode
+            The cell which is currently being processed.
+        cell_index : int
+            The position of the cell within the notebook object.
+        execution_count : int
+            The execution count to be assigned to the cell (default: Use kernel response)
+        store_history : bool
+            Determines if history should be stored in the kernel (default: False).
+            Specific to ipython kernels, which can store command histories.
 
-        return True
+        Returns
+        -------
+        output : dict
+            The execution output payload (or None for no output).
 
-    def _should_sample_error(
-        self,
-        event,  # type: Event
-        hint,  # type: Hint
-    ):
-        # type: (...) -> bool
-        error_sampler = self.options.get("error_sampler", None)
+        Raises
+        ------
+        CellExecutionError
+            If execution failed and should raise an exception, this will be raised
+            with defaults about the failure.
 
-        if callable(error_sampler):
-            with capture_internal_exceptions():
-                sample_rate = error_sampler(event, hint)
-        else:
-            sample_rate = self.options["sample_rate"]
+        Returns
+        -------
+        cell : NotebookNode
+            The cell which was just processed.
+        """
+        assert self.kc is not None
 
-        try:
-            not_in_sample_rate = sample_rate < 1.0 and random.random() >= sample_rate
-        except NameError:
-            logger.warning(
-                "The provided error_sampler raised an error. Defaulting to sampling the event."
-            )
+        await run_hook(self.on_cell_start, cell=cell, cell_index=cell_index)
 
-            # If the error_sampler raised an error, we should sample the event, since the default behavior
-            # (when no sample_rate or error_sampler is provided) is to sample all events.
-            not_in_sample_rate = False
-        except TypeError:
-            parameter, verb = (
-                ("error_sampler", "returned")
-                if callable(error_sampler)
-                else ("sample_rate", "contains")
-            )
-            logger.warning(
-                "The provided %s %s an invalid value of %s. The value should be a float or a bool. Defaulting to sampling the event."
-                % (parameter, verb, repr(sample_rate))
-            )
+        if cell.cell_type != "code" or not cell.source.strip():
+            self.log.debug("Skipping non-executing cell %s", cell_index)
+            return cell
 
-            # If the sample_rate has an invalid value, we should sample the event, since the default behavior
-            # (when no sample_rate or error_sampler is provided) is to sample all events.
-            not_in_sample_rate = False
+        if self.skip_cells_with_tag in cell.metadata.get("tags", []):
+            self.log.debug("Skipping tagged cell %s", cell_index)
+            return cell
 
-        if not_in_sample_rate:
-            # because we will not sample this event, record a "lost event".
-            if self.transport:
-                self.transport.record_lost_event("sample_rate", data_category="error")
+        if self.record_timing:  # clear execution metadata prior to execution
+            cell["metadata"]["execution"] = {}
 
-            return False
+        self.log.debug("Executing cell:\n%s", cell.source)
 
-        return True
-
-    def _update_session_from_event(
-        self,
-        session,  # type: Session
-        event,  # type: Event
-    ):
-        # type: (...) -> None
-
-        crashed = False
-        errored = False
-        user_agent = None
-
-        exceptions = (event.get("exception") or {}).get("values")
-        if exceptions:
-            errored = True
-            for error in exceptions:
-                if isinstance(error, AnnotatedValue):
-                    error = error.value or {}
-                mechanism = error.get("mechanism")
-                if isinstance(mechanism, Mapping) and mechanism.get("handled") is False:
-                    crashed = True
-                    break
-
-        user = event.get("user")
-
-        if session.user_agent is None:
-            headers = (event.get("request") or {}).get("headers")
-            headers_dict = headers if isinstance(headers, dict) else {}
-            for k, v in headers_dict.items():
-                if k.lower() == "user-agent":
-                    user_agent = v
-                    break
-
-        session.update(
-            status="crashed" if crashed else None,
-            user=user,
-            user_agent=user_agent,
-            errors=session.errors + (errored or crashed),
+        cell_allows_errors = (not self.force_raise_errors) and (
+            self.allow_errors or "raises-exception" in cell.metadata.get("tags", [])
         )
 
-    def capture_event(
-        self,
-        event,  # type: Event
-        hint=None,  # type: Optional[Hint]
-        scope=None,  # type: Optional[Scope]
-    ):
-        # type: (...) -> Optional[str]
-        """Captures an event.
-
-        :param event: A ready-made event that can be directly sent to Sentry.
-
-        :param hint: Contains metadata about the event that can be read from `before_send`, such as the original exception object or a HTTP request object.
-
-        :param scope: An optional :py:class:`sentry_sdk.Scope` to apply to events.
-
-        :returns: An event ID. May be `None` if there is no DSN set or of if the SDK decided to discard the event for other reasons. In such situations setting `debug=True` on `init()` may help.
-        """
-        hint = dict(hint or ())  # type: Hint
-
-        if not self._should_capture(event, hint, scope):
-            return None
-
-        profile = event.pop("profile", None)
-
-        event_id = event.get("event_id")
-        if event_id is None:
-            event["event_id"] = event_id = uuid.uuid4().hex
-        event_opt = self._prepare_event(event, hint, scope)
-        if event_opt is None:
-            return None
-
-        # whenever we capture an event we also check if the session needs
-        # to be updated based on that information.
-        session = scope._session if scope else None
-        if session:
-            self._update_session_from_event(session, event)
-
-        is_transaction = event_opt.get("type") == "transaction"
-        is_checkin = event_opt.get("type") == "check_in"
-
-        if (
-            not is_transaction
-            and not is_checkin
-            and not self._should_sample_error(event, hint)
-        ):
-            return None
-
-        attachments = hint.get("attachments")
-
-        trace_context = event_opt.get("contexts", {}).get("trace") or {}
-        dynamic_sampling_context = trace_context.pop("dynamic_sampling_context", {})
-
-        headers = {
-            "event_id": event_opt["event_id"],
-            "sent_at": format_timestamp(datetime.now(timezone.utc)),
-        }  # type: dict[str, object]
-
-        if dynamic_sampling_context:
-            headers["trace"] = dynamic_sampling_context
-
-        envelope = Envelope(headers=headers)
-
-        if is_transaction:
-            if isinstance(profile, Profile):
-                envelope.add_profile(profile.to_json(event_opt, self.options))
-            envelope.add_transaction(event_opt)
-        elif is_checkin:
-            envelope.add_checkin(event_opt)
-        else:
-            envelope.add_event(event_opt)
-
-        for attachment in attachments or ():
-            envelope.add_item(attachment.to_envelope_item())
-
-        return_value = None
-        if self.spotlight:
-            self.spotlight.capture_envelope(envelope)
-            return_value = event_id
-
-        if self.transport is not None:
-            self.transport.capture_envelope(envelope)
-            return_value = event_id
-
-        return return_value
-
-    def _capture_experimental_log(self, log):
-        # type: (Log) -> None
-        logs_enabled = self.options["_experiments"].get("enable_logs", False)
-        if not logs_enabled:
-            return
-
-        current_scope = sentry_sdk.get_current_scope()
-        isolation_scope = sentry_sdk.get_isolation_scope()
-
-        log["attributes"]["sentry.sdk.name"] = SDK_INFO["name"]
-        log["attributes"]["sentry.sdk.version"] = SDK_INFO["version"]
-
-        server_name = self.options.get("server_name")
-        if server_name is not None and SPANDATA.SERVER_ADDRESS not in log["attributes"]:
-            log["attributes"][SPANDATA.SERVER_ADDRESS] = server_name
-
-        environment = self.options.get("environment")
-        if environment is not None and "sentry.environment" not in log["attributes"]:
-            log["attributes"]["sentry.environment"] = environment
-
-        release = self.options.get("release")
-        if release is not None and "sentry.release" not in log["attributes"]:
-            log["attributes"]["sentry.release"] = release
-
-        span = current_scope.span
-        if span is not None and "sentry.trace.parent_span_id" not in log["attributes"]:
-            log["attributes"]["sentry.trace.parent_span_id"] = span.span_id
-
-        if log.get("trace_id") is None:
-            transaction = current_scope.transaction
-            propagation_context = isolation_scope.get_active_propagation_context()
-            if transaction is not None:
-                log["trace_id"] = transaction.trace_id
-            elif propagation_context is not None:
-                log["trace_id"] = propagation_context.trace_id
-
-        # The user, if present, is always set on the isolation scope.
-        if isolation_scope._user is not None:
-            for log_attribute, user_attribute in (
-                ("user.id", "id"),
-                ("user.name", "username"),
-                ("user.email", "email"),
-            ):
-                if (
-                    user_attribute in isolation_scope._user
-                    and log_attribute not in log["attributes"]
-                ):
-                    log["attributes"][log_attribute] = isolation_scope._user[
-                        user_attribute
-                    ]
-
-        # If debug is enabled, log the log to the console
-        debug = self.options.get("debug", False)
-        if debug:
-            logger.debug(
-                f'[Sentry Logs] [{log.get("severity_text")}] {log.get("body")}'
+        await run_hook(self.on_cell_execute, cell=cell, cell_index=cell_index)
+        parent_msg_id = await ensure_async(
+            self.kc.execute(
+                cell.source, store_history=store_history, stop_on_error=not cell_allows_errors
             )
+        )
+        await run_hook(self.on_cell_complete, cell=cell, cell_index=cell_index)
+        # We launched a code cell to execute
+        self.code_cells_executed += 1
+        exec_timeout = self._get_timeout(cell)
 
-        before_send_log = self.options["_experiments"].get("before_send_log")
-        if before_send_log is not None:
-            log = before_send_log(log, {})
-        if log is None:
+        cell.outputs = []
+        self.clear_before_next_output = False
+
+        task_poll_kernel_alive = asyncio.ensure_future(self._async_poll_kernel_alive())
+        task_poll_output_msg = asyncio.ensure_future(
+            self._async_poll_output_msg(parent_msg_id, cell, cell_index)
+        )
+        self.task_poll_for_reply = asyncio.ensure_future(
+            self._async_poll_for_reply(
+                parent_msg_id, cell, exec_timeout, task_poll_output_msg, task_poll_kernel_alive
+            )
+        )
+        try:
+            exec_reply = await self.task_poll_for_reply
+        except asyncio.CancelledError:
+            # can only be cancelled by task_poll_kernel_alive when the kernel is dead
+            task_poll_output_msg.cancel()
+            raise DeadKernelError("Kernel died") from None
+        except Exception as e:
+            # Best effort to cancel request if it hasn't been resolved
+            try:
+                # Check if the task_poll_output is doing the raising for us
+                if not isinstance(e, CellControlSignal):
+                    task_poll_output_msg.cancel()
+            finally:
+                raise
+
+        if execution_count:
+            cell["execution_count"] = execution_count
+        await run_hook(
+            self.on_cell_executed, cell=cell, cell_index=cell_index, execute_reply=exec_reply
+        )
+
+        if self.coalesce_streams and cell.outputs:
+            new_outputs = []
+            streams: dict[str, NotebookNode] = {}
+            for output in cell.outputs:
+                if output["output_type"] == "stream":
+                    if output["name"] in streams:
+                        streams[output["name"]]["text"] += output["text"]
+                    else:
+                        new_outputs.append(output)
+                        streams[output["name"]] = output
+                else:
+                    new_outputs.append(output)
+
+            # process \r and \b characters
+            for output in streams.values():
+                old = output["text"]
+                while len(output["text"]) < len(old):
+                    old = output["text"]
+                    # Cancel out anything-but-newline followed by backspace
+                    output["text"] = _RGX_BACKSPACE.sub("", output["text"])
+                # Replace all carriage returns not followed by newline
+                output["text"] = _RGX_CARRIAGERETURN.sub("", output["text"])
+
+            # We also want to ensure stdout and stderr are always in the same consecutive order,
+            # because they are asynchronous, so order isn't guaranteed.
+            for i, output in enumerate(new_outputs):
+                if output["output_type"] == "stream" and output["name"] == "stderr":
+                    if (
+                        len(new_outputs) >= i + 2
+                        and new_outputs[i + 1]["output_type"] == "stream"
+                        and new_outputs[i + 1]["name"] == "stdout"
+                    ):
+                        stdout = new_outputs.pop(i + 1)
+                        new_outputs.insert(i, stdout)
+
+            cell.outputs = new_outputs
+
+        await self._check_raise_for_error(cell, cell_index, exec_reply)
+
+        self.nb["cells"][cell_index] = cell
+        return cell
+
+    execute_cell = run_sync(async_execute_cell)
+
+    def process_message(
+        self, msg: dict[str, t.Any], cell: NotebookNode, cell_index: int
+    ) -> NotebookNode | None:
+        """
+        Processes a kernel message, updates cell state, and returns the
+        resulting output object that was appended to cell.outputs.
+
+        The input argument *cell* is modified in-place.
+
+        Parameters
+        ----------
+        msg : dict
+            The kernel message being processed.
+        cell : nbformat.NotebookNode
+            The cell which is currently being processed.
+        cell_index : int
+            The position of the cell within the notebook object.
+
+        Returns
+        -------
+        output : NotebookNode
+            The execution output payload (or None for no output).
+
+        Raises
+        ------
+        CellExecutionComplete
+          Once a message arrives which indicates computation completeness.
+
+        """
+        msg_type = msg["msg_type"]
+        self.log.debug("msg_type: %s", msg_type)
+        content = msg["content"]
+        self.log.debug("content: %s", content)
+
+        # while it's tempting to go for a more concise
+        # display_id = content.get("transient", {}).get("display_id", None)
+        # this breaks if transient is explicitly set to None
+        transient = content.get("transient")
+        display_id = transient.get("display_id") if transient else None
+
+        if display_id and msg_type in {"execute_result", "display_data", "update_display_data"}:
+            self._update_display_id(display_id, msg)
+
+        # set the prompt number for the input and the output
+        if "execution_count" in content:
+            cell["execution_count"] = content["execution_count"]
+
+        if self.record_timing:
+            if msg_type == "status":
+                if content["execution_state"] == "idle":
+                    cell["metadata"]["execution"]["iopub.status.idle"] = timestamp(msg)
+                elif content["execution_state"] == "busy":
+                    cell["metadata"]["execution"]["iopub.status.busy"] = timestamp(msg)
+            elif msg_type == "execute_input":
+                cell["metadata"]["execution"]["iopub.execute_input"] = timestamp(msg)
+
+        if msg_type == "status":
+            if content["execution_state"] == "idle":
+                raise CellExecutionComplete()
+        elif msg_type == "clear_output":
+            self.clear_output(cell.outputs, msg, cell_index)
+        elif msg_type.startswith("comm"):
+            self.handle_comm_msg(cell.outputs, msg, cell_index)
+        # Check for remaining messages we don't process
+        elif msg_type not in ["execute_input", "update_display_data"]:
+            # Assign output as our processed "result"
+            return self.output(cell.outputs, msg, display_id, cell_index)
+        return None
+
+    def output(
+        self, outs: list[NotebookNode], msg: dict[str, t.Any], display_id: str, cell_index: int
+    ) -> NotebookNode | None:
+        """Handle output."""
+
+        msg_type = msg["msg_type"]
+        out: NotebookNode | None = None
+
+        parent_msg_id = msg["parent_header"].get("msg_id")
+        if self.output_hook_stack[parent_msg_id]:
+            # if we have a hook registered, it will override our
+            # default output behaviour (e.g. OutputWidget)
+            hook = self.output_hook_stack[parent_msg_id][-1]
+            hook.output(outs, msg, display_id, cell_index)
+            return None
+
+        try:
+            out = output_from_msg(msg)
+        except ValueError:
+            self.log.error(f"unhandled iopub msg: {msg_type}")
+            return None
+
+        if self.clear_before_next_output:
+            self.log.debug("Executing delayed clear_output")
+            outs[:] = []
+            self.clear_display_id_mapping(cell_index)
+            self.clear_before_next_output = False
+
+        if display_id:
+            # record output index in:
+            #   _display_id_map[display_id][cell_idx]
+            cell_map = self._display_id_map.setdefault(display_id, {})
+            output_idx_list = cell_map.setdefault(cell_index, [])
+            output_idx_list.append(len(outs))
+
+        if out:
+            outs.append(out)
+
+        return out
+
+    def clear_output(
+        self, outs: list[NotebookNode], msg: dict[str, t.Any], cell_index: int
+    ) -> None:
+        """Clear output."""
+        content = msg["content"]
+
+        parent_msg_id = msg["parent_header"].get("msg_id")
+        if self.output_hook_stack[parent_msg_id]:
+            # if we have a hook registered, it will override our
+            # default clear_output behaviour (e.g. OutputWidget)
+            hook = self.output_hook_stack[parent_msg_id][-1]
+            hook.clear_output(outs, msg, cell_index)
             return
 
-        if self.log_batcher:
-            self.log_batcher.add(log)
-
-    def capture_session(
-        self, session  # type: Session
-    ):
-        # type: (...) -> None
-        if not session.release:
-            logger.info("Discarded session update because of missing release")
+        if content.get("wait"):
+            self.log.debug("Wait to clear output")
+            self.clear_before_next_output = True
         else:
-            self.session_flusher.add_session(session)
+            self.log.debug("Immediate clear output")
+            outs[:] = []
+            self.clear_display_id_mapping(cell_index)
 
-    if TYPE_CHECKING:
+    def clear_display_id_mapping(self, cell_index: int) -> None:
+        """Clear a display id mapping for a cell."""
+        for _, cell_map in self._display_id_map.items():
+            if cell_index in cell_map:
+                cell_map[cell_index] = []
 
-        @overload
-        def get_integration(self, name_or_class):
-            # type: (str) -> Optional[Integration]
-            ...
+    def handle_comm_msg(
+        self, outs: list[NotebookNode], msg: dict[str, t.Any], cell_index: int
+    ) -> None:
+        """Handle a comm message."""
+        content = msg["content"]
+        data = content["data"]
+        if self.store_widget_state and "state" in data:  # ignore custom msg'es
+            self.widget_state.setdefault(content["comm_id"], {}).update(data["state"])
+            if data.get("buffer_paths"):
+                comm_id = content["comm_id"]
+                if comm_id not in self.widget_buffers:
+                    self.widget_buffers[comm_id] = {}
+                # for each comm, the path uniquely identifies a buffer
+                new_buffers: dict[tuple[str, ...], dict[str, str]] = {
+                    tuple(k["path"]): k for k in self._get_buffer_data(msg)
+                }
+                self.widget_buffers[comm_id].update(new_buffers)
+        # There are cases where we need to mimic a frontend, to get similar behaviour as
+        # when using the Output widget from Jupyter lab/notebook
+        if msg["msg_type"] == "comm_open":
+            target = msg["content"].get("target_name")
+            handler = self.comm_open_handlers.get(target)
+            if handler:
+                comm_id = msg["content"]["comm_id"]
+                comm_object = handler(msg)
+                if comm_object:
+                    self.comm_objects[comm_id] = comm_object
+            else:
+                self.log.warning(f"No handler found for comm target {target!r}")
+        elif msg["msg_type"] == "comm_msg":
+            content = msg["content"]
+            comm_id = msg["content"]["comm_id"]
+            if comm_id in self.comm_objects:
+                self.comm_objects[comm_id].handle_msg(msg)
 
-        @overload
-        def get_integration(self, name_or_class):
-            # type: (type[I]) -> Optional[I]
-            ...
+    def _serialize_widget_state(self, state: dict[str, t.Any]) -> dict[str, t.Any]:
+        """Serialize a widget state, following format in @jupyter-widgets/schema."""
+        return {
+            "model_name": state.get("_model_name"),
+            "model_module": state.get("_model_module"),
+            "model_module_version": state.get("_model_module_version"),
+            "state": state,
+        }
 
-    def get_integration(
-        self, name_or_class  # type: Union[str, Type[Integration]]
-    ):
-        # type: (...) -> Optional[Integration]
-        """Returns the integration for this client by name or class.
-        If the client does not have that integration then `None` is returned.
+    def _get_buffer_data(self, msg: dict[str, t.Any]) -> list[dict[str, str]]:
+        encoded_buffers = []
+        paths = msg["content"]["data"]["buffer_paths"]
+        buffers = msg["buffers"]
+        for path, buffer in zip(paths, buffers):
+            encoded_buffers.append(
+                {
+                    "data": base64.b64encode(buffer).decode("utf-8"),
+                    "encoding": "base64",
+                    "path": path,
+                }
+            )
+        return encoded_buffers
+
+    def register_output_hook(self, msg_id: str, hook: OutputWidget) -> None:
+        """Registers an override object that handles output/clear_output instead.
+
+        Multiple hooks can be registered, where the last one will be used (stack based)
         """
-        if isinstance(name_or_class, str):
-            integration_name = name_or_class
-        elif name_or_class.identifier is not None:
-            integration_name = name_or_class.identifier
-        else:
-            raise ValueError("Integration has no name")
+        # mimics
+        # https://jupyterlab.github.io/jupyterlab/services/interfaces/kernel.ikernelconnection.html#registermessagehook
+        self.output_hook_stack[msg_id].append(hook)
 
-        return self.integrations.get(integration_name)
+    def remove_output_hook(self, msg_id: str, hook: OutputWidget) -> None:
+        """Unregisters an override object that handles output/clear_output instead"""
+        # mimics
+        # https://jupyterlab.github.io/jupyterlab/services/interfaces/kernel.ikernelconnection.html#removemessagehook
+        removed_hook = self.output_hook_stack[msg_id].pop()
+        assert removed_hook == hook
 
-    def close(
-        self,
-        timeout=None,  # type: Optional[float]
-        callback=None,  # type: Optional[Callable[[int, float], None]]
-    ):
-        # type: (...) -> None
-        """
-        Close the client and shut down the transport. Arguments have the same
-        semantics as :py:meth:`Client.flush`.
-        """
-        if self.transport is not None:
-            self.flush(timeout=timeout, callback=callback)
-            self.session_flusher.kill()
-            if self.metrics_aggregator is not None:
-                self.metrics_aggregator.kill()
-            if self.log_batcher is not None:
-                self.log_batcher.kill()
-            if self.monitor:
-                self.monitor.kill()
-            self.transport.kill()
-            self.transport = None
-
-    def flush(
-        self,
-        timeout=None,  # type: Optional[float]
-        callback=None,  # type: Optional[Callable[[int, float], None]]
-    ):
-        # type: (...) -> None
-        """
-        Wait for the current events to be sent.
-
-        :param timeout: Wait for at most `timeout` seconds. If no `timeout` is provided, the `shutdown_timeout` option value is used.
-
-        :param callback: Is invoked with the number of pending events and the configured timeout.
-        """
-        if self.transport is not None:
-            if timeout is None:
-                timeout = self.options["shutdown_timeout"]
-            self.session_flusher.flush()
-            if self.metrics_aggregator is not None:
-                self.metrics_aggregator.flush()
-            if self.log_batcher is not None:
-                self.log_batcher.flush()
-            self.transport.flush(timeout=timeout, callback=callback)
-
-    def __enter__(self):
-        # type: () -> _Client
-        return self
-
-    def __exit__(self, exc_type, exc_value, tb):
-        # type: (Any, Any, Any) -> None
-        self.close()
+    def on_comm_open_jupyter_widget(self, msg: dict[str, t.Any]) -> t.Any | None:
+        """Handle a jupyter widget comm open."""
+        content = msg["content"]
+        data = content["data"]
+        state = data["state"]
+        comm_id = msg["content"]["comm_id"]
+        module = self.widget_registry.get(state["_model_module"])
+        if module:
+            widget_class = module.get(state["_model_name"])
+            if widget_class:
+                return widget_class(comm_id, state, self.kc, self)
+        return None
 
 
-from typing import TYPE_CHECKING
+def execute(
+    nb: NotebookNode,
+    cwd: str | None = None,
+    km: KernelManager | None = None,
+    **kwargs: t.Any,
+) -> NotebookNode:
+    """Execute a notebook's code, updating outputs within the notebook object.
 
-if TYPE_CHECKING:
-    # Make mypy, PyCharm and other static analyzers think `get_options` is a
-    # type to have nicer autocompletion for params.
-    #
-    # Use `ClientConstructor` to define the argument types of `init` and
-    # `Dict[str, Any]` to tell static analyzers about the return type.
+    This is a convenient wrapper around NotebookClient. It returns the
+    modified notebook object.
 
-    class get_options(ClientConstructor, Dict[str, Any]):  # noqa: N801
-        pass
-
-    class Client(ClientConstructor, _Client):
-        pass
-
-else:
-    # Alias `get_options` for actual usage. Go through the lambda indirection
-    # to throw PyCharm off of the weakly typed signature (it would otherwise
-    # discover both the weakly typed signature of `_init` and our faked `init`
-    # type).
-
-    get_options = (lambda: _get_options)()
-    Client = (lambda: _Client)()
+    Parameters
+    ----------
+    nb : NotebookNode
+      The notebook object to be executed
+    cwd : str, optional
+      If supplied, the kernel will run in this directory
+    km : AsyncKernelManager, optional
+      If supplied, the specified kernel manager will be used for code execution.
+    kwargs :
+      Any other options for NotebookClient, e.g. timeout, kernel_name
+    """
+    resources = {}
+    if cwd is not None:
+        resources["metadata"] = {"path": cwd}
+    return NotebookClient(nb=nb, resources=resources, km=km, **kwargs).execute()
