@@ -1,0 +1,52 @@
+2025-07-02 21:26:37,301 - __main__ - INFO - 🚀 Iniciando CardioAI Pro - Versão Completa Final...
+2025-07-02 21:26:37,301 - __main__ - INFO - 📁 Diretório: /home/ubuntu/cardio_ai_repo
+2025-07-02 21:26:37,302 - __main__ - INFO - ✅ Modelo PTB-XL encontrado: /home/ubuntu/cardio_ai_repo/models/ecg_model_final.h5
+2025-07-02 21:26:37,302 - __main__ - INFO - 📊 Tamanho: 8.7 MB
+2025-07-02 21:26:38.168189: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-07-02 21:26:38.170585: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
+2025-07-02 21:26:38.178137: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
+2025-07-02 21:26:38.192238: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1751505998.216744    8807 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1751505998.225227    8807 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1751505998.243726    8807 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751505998.243760    8807 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751505998.243763    8807 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751505998.243765    8807 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-07-02 21:26:38.248780: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-07-02 21:26:41,477 - backend.app.services.ptbxl_model_service - INFO - Carregando modelo PTB-XL...
+2025-07-02 21:26:41.486707: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+2025-07-02 21:26:41,673 - absl - WARNING - Compiled the loaded model, but the compiled metrics have yet to be built. `model.compile_metrics` will be empty until you train or evaluate the model.
+2025-07-02 21:26:41,678 - backend.app.services.ptbxl_model_service - INFO - Modelo PTB-XL carregado com sucesso!
+2025-07-02 21:26:41,679 - backend.app.services.ptbxl_model_service - INFO - Input shape: (None, 12, 1000)
+2025-07-02 21:26:41,679 - backend.app.services.ptbxl_model_service - INFO - Output shape: (None, 71)
+2025-07-02 21:26:41,679 - backend.app.services.ptbxl_model_service - INFO - Parâmetros: 757,511
+2025-07-02 21:26:41,679 - backend.app.services.ptbxl_model_service - INFO - AUC: 0.9979
+2025-07-02 21:26:41,679 - backend.app.services.ptbxl_model_service - INFO - Mapeamento de 71 classes carregado
+2025-07-02 21:26:41,686 - __main__ - INFO - 🌐 Iniciando servidor na porta 8000...
+2025-07-02 21:26:41,686 - __main__ - INFO - 📱 Interface web: http://localhost:8000
+2025-07-02 21:26:41,686 - __main__ - INFO - 📚 Documentação: http://localhost:8000/docs
+2025-07-02 21:26:41,686 - __main__ - INFO - 🔍 Health check: http://localhost:8000/health
+INFO:     Started server process [8807]
+INFO:     Waiting for application startup.
+2025-07-02 21:26:41,701 - backend.app.main_complete_final - INFO - 🚀 Iniciando CardioAI Pro - Versão Completa...
+2025-07-02 21:26:41,701 - backend.app.main_complete_final - INFO - ✅ Modelo PTB-XL carregado com sucesso!
+2025-07-02 21:26:41,701 - backend.app.main_complete_final - INFO - 📊 AUC: 0.9979
+2025-07-02 21:26:41,701 - backend.app.main_complete_final - INFO - 🧠 Classes: 71
+2025-07-02 21:26:41,701 - backend.app.main_complete_final - INFO - 🖼️ Digitalizador de imagens ECG inicializado
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:47684 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47690 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47694 - "GET /info HTTP/1.1" 200 OK
+INFO:     10.170.44.1:57262 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.170.44.1:57268 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:37862 - "GET /info HTTP/1.1" 200 OK
+2025-07-02 21:28:01,116 - backend.app.main_complete_final - INFO - Digitalizando ECG para paciente TEST001
+2025-07-02 21:28:01,294 - backend.app.main_complete_final - INFO - Realizando análise com modelo PTB-XL...
+2025-07-02 21:28:01,296 - backend.app.services.ptbxl_model_service - INFO - ECG preprocessado: (1, 12, 1000)
+2025-07-02 21:28:01,296 - backend.app.services.ptbxl_model_service - INFO - Realizando predição com modelo PTB-XL...
+2025-07-02 21:28:01,534 - backend.app.services.ptbxl_model_service - INFO - Predição concluída - Principais diagnósticos: 1
+2025-07-02 21:28:01,535 - backend.app.main_complete_final - INFO - Análise completa concluída para TEST001
+INFO:     10.170.44.1:37236 - "POST /upload-and-analyze HTTP/1.1" 200 OK
