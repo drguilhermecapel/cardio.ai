@@ -50,3 +50,45 @@ INFO:     10.170.44.1:37862 - "GET /info HTTP/1.1" 200 OK
 2025-07-02 21:28:01,534 - backend.app.services.ptbxl_model_service - INFO - Predição concluída - Principais diagnósticos: 1
 2025-07-02 21:28:01,535 - backend.app.main_complete_final - INFO - Análise completa concluída para TEST001
 INFO:     10.170.44.1:37236 - "POST /upload-and-analyze HTTP/1.1" 200 OK
+INFO:     10.170.44.1:50944 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:54480 - "HEAD /upload-and-analyze HTTP/1.1" 405 Method Not Allowed
+INFO:     10.170.44.1:54496 - "HEAD / HTTP/1.1" 405 Method Not Allowed
+INFO:     10.170.44.1:54498 - "GET /upload-and-analyze HTTP/1.1" 405 Method Not Allowed
+INFO:     10.170.44.1:54514 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:52726 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:52732 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.170.44.1:52744 - "GET /info HTTP/1.1" 200 OK
+INFO:     10.170.44.1:60220 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:60226 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.170.44.1:57200 - "GET /upload-and-analyze HTTP/1.1" 405 Method Not Allowed
+2025-07-02 21:32:22,841 - backend.app.main_complete_final - INFO - Digitalizando ECG para paciente 01
+2025-07-02 21:32:22,882 - backend.app.main_complete_final - INFO - Realizando análise com modelo PTB-XL...
+2025-07-02 21:32:22,883 - backend.app.services.ptbxl_model_service - INFO - ECG preprocessado: (1, 12, 1000)
+2025-07-02 21:32:22,883 - backend.app.services.ptbxl_model_service - INFO - Realizando predição com modelo PTB-XL...
+2025-07-02 21:32:22,949 - backend.app.services.ptbxl_model_service - INFO - Predição concluída - Principais diagnósticos: 1
+2025-07-02 21:32:22,950 - backend.app.main_complete_final - INFO - Análise completa concluída para 01
+INFO:     10.170.44.1:33290 - "POST /upload-and-analyze HTTP/1.1" 200 OK
+INFO:     10.170.44.1:39302 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.170.44.1:44228 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.170.44.1:44242 - "GET /model-info HTTP/1.1" 200 OK
+INFO:     10.170.44.1:57712 - "GET /upload-and-analyze HTTP/1.1" 405 Method Not Allowed
+INFO:     10.170.44.1:52564 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:52570 - "GET /health HTTP/1.1" 200 OK
+2025-07-02 21:35:08,218 - backend.app.main_complete_final - INFO - Digitalizando ECG para paciente 01
+2025-07-02 21:35:08,247 - backend.app.main_complete_final - INFO - Realizando análise com modelo PTB-XL...
+2025-07-02 21:35:08,248 - backend.app.services.ptbxl_model_service - INFO - ECG preprocessado: (1, 12, 1000)
+2025-07-02 21:35:08,248 - backend.app.services.ptbxl_model_service - INFO - Realizando predição com modelo PTB-XL...
+2025-07-02 21:35:08,314 - backend.app.services.ptbxl_model_service - INFO - Predição concluída - Principais diagnósticos: 1
+2025-07-02 21:35:08,315 - backend.app.main_complete_final - INFO - Análise completa concluída para 01
+INFO:     10.170.44.1:49108 - "POST /upload-and-analyze HTTP/1.1" 200 OK
+2025-07-02 21:35:36,108 - backend.app.main_complete_final - INFO - Digitalizando ECG para paciente 01
+2025-07-02 21:35:36,140 - backend.app.main_complete_final - INFO - Realizando análise com modelo PTB-XL...
+2025-07-02 21:35:36,141 - backend.app.services.ptbxl_model_service - INFO - ECG preprocessado: (1, 12, 1000)
+2025-07-02 21:35:36,141 - backend.app.services.ptbxl_model_service - INFO - Realizando predição com modelo PTB-XL...
+2025-07-02 21:35:36,213 - backend.app.services.ptbxl_model_service - INFO - Predição concluída - Principais diagnósticos: 1
+2025-07-02 21:35:36,214 - backend.app.main_complete_final - INFO - Análise completa concluída para 01
+INFO:     10.170.44.1:42584 - "POST /upload-and-analyze HTTP/1.1" 200 OK
+INFO:     10.170.44.1:47834 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36706 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36720 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:34080 - "GET /health HTTP/1.1" 200 OK
