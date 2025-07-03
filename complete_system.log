@@ -120,3 +120,19 @@ INFO:     127.0.0.1:53558 - "GET /info HTTP/1.1" 200 OK
 INFO:     127.0.0.1:56990 - "GET /test-radical-fix HTTP/1.1" 404 Not Found
 INFO:     127.0.0.1:60290 - "GET /info HTTP/1.1" 200 OK
 INFO:     10.170.44.1:34724 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.170.44.1:58520 - "HEAD / HTTP/1.1" 405 Method Not Allowed
+INFO:     10.170.44.1:58534 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:37194 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:37208 - "GET /health HTTP/1.1" 200 OK
+2025-07-02 22:06:18,296 - backend.app.main_complete_final - INFO - Digitalizando ECG para paciente 01
+2025-07-02 22:06:18,336 - backend.app.main_complete_final - INFO - Realizando análise com modelo PTB-XL...
+2025-07-02 22:06:18,337 - backend.app.services.ptbxl_model_service - INFO - ECG preprocessado: (1, 12, 1000)
+2025-07-02 22:06:18,337 - backend.app.services.ptbxl_model_service - INFO - Realizando predição com modelo PTB-XL...
+2025-07-02 22:06:18,405 - backend.app.services.ptbxl_model_service - INFO - Predição concluída - Principais diagnósticos: 1
+2025-07-02 22:06:18,405 - backend.app.main_complete_final - INFO - Análise completa concluída para 01
+INFO:     10.170.44.1:47824 - "POST /upload-and-analyze HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2025-07-02 22:22:53,857 - backend.app.main_complete_final - INFO - 🛑 Encerrando CardioAI Pro...
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8807]

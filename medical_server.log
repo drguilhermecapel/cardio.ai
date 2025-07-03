@@ -1,0 +1,56 @@
+2025-07-02 22:22:01.556309: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-07-02 22:22:01.557153: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
+2025-07-02 22:22:01.561076: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
+2025-07-02 22:22:01.573308: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1751509321.594041   15033 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1751509321.600272   15033 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1751509321.615749   15033 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751509321.615782   15033 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751509321.615784   15033 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751509321.615787   15033 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-07-02 22:22:01.620499: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+/home/ubuntu/cardio_ai_repo/backend/app/main_medical_grade.py:65: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+INFO:     Started server process [15033]
+INFO:     Waiting for application startup.
+INFO:backend.app.main_medical_grade:🏥 Iniciando CardioAI Pro - Medical Grade...
+INFO:backend.app.main_medical_grade:📊 Carregando modelo neural .h5...
+INFO:backend.app.services.model_loader_robust:Inicializando ModelLoaderRobust para: /home/ubuntu/cardio_ai_repo/models/ecg_model_final.h5
+INFO:backend.app.services.model_loader_robust:Iniciando carregamento robusto do modelo .h5...
+INFO:backend.app.services.model_loader_robust:Arquivo do modelo: 8.7 MB
+INFO:backend.app.services.model_loader_robust:Hash do modelo: e7e89ca6d02bbb34...
+2025-07-02 22:22:04.828613: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+INFO:backend.app.services.model_loader_robust:TensorFlow configurado para uso médico
+INFO:backend.app.services.model_loader_robust:Carregando modelo TensorFlow/Keras...
+INFO:backend.app.services.model_loader_robust:Classes carregadas: 71 condições
+INFO:backend.app.services.model_loader_robust:Iniciando validação médica do modelo...
+2025-07-02 22:22:05.078480: E tensorflow/core/framework/node_def_util.cc:680] NodeDef mentions attribute use_unbounded_threadpool which is not in the op definition: Op<name=MapDataset; signature=input_dataset:variant, other_arguments: -> handle:variant; attr=f:func; attr=Targuments:list(type),min=0; attr=output_types:list(type),min=1; attr=output_shapes:list(shape),min=1; attr=use_inter_op_parallelism:bool,default=true; attr=preserve_cardinality:bool,default=false; attr=force_synchronous:bool,default=false; attr=metadata:string,default=""> This may be expected if your graph generating binary is newer  than this binary. Unknown attributes will be ignored. NodeDef: {{node ParallelMapDatasetV2/_14}}
+INFO:backend.app.services.model_loader_robust:Validação médica: 5/6 testes aprovados
+INFO:backend.app.services.model_loader_robust:Grau médico: B - Aprovado com restrições
+INFO:backend.app.services.model_loader_robust:✅ input_shape: Dimensões de entrada corretas
+INFO:backend.app.services.model_loader_robust:✅ output_classes: Classes corretas: 71
+INFO:backend.app.services.model_loader_robust:✅ prediction_shape: Predição com formato correto
+INFO:backend.app.services.model_loader_robust:✅ probability_range: Saída em formato de probabilidade
+INFO:backend.app.services.model_loader_robust:❌ discrimination: Modelo não discrimina adequadamente
+INFO:backend.app.services.model_loader_robust:✅ prediction_speed: Tempo adequado: 0.07s
+INFO:backend.app.services.model_loader_robust:✅ Modelo carregado e validado com sucesso para uso médico!
+INFO:backend.app.main_medical_grade:✅ Modelo neural carregado e validado para uso médico
+INFO:backend.app.main_medical_grade:📈 Iniciando monitoramento médico...
+INFO:backend.app.services.medical_monitoring:Banco de dados médico inicializado
+INFO:backend.app.services.medical_monitoring:Sistema de monitoramento médico inicializado
+INFO:backend.app.services.medical_monitoring:Monitoramento médico iniciado
+INFO:backend.app.main_medical_grade:✅ Monitoramento médico ativo
+INFO:backend.app.main_medical_grade:🖼️ Inicializando digitalizador de ECG...
+INFO:backend.app.main_medical_grade:✅ Digitalizador de ECG pronto
+INFO:backend.app.main_medical_grade:🎉 CardioAI Pro - Medical Grade inicializado com sucesso!
+INFO:     Application startup complete.
+ERROR:    [Errno 98] error while attempting to bind on address ('0.0.0.0', 8000): address already in use
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
