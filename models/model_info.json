@@ -1,0 +1,26 @@
+{
+  "nome": "ECG Multilabel Classifier",
+  "versao": "1.0",
+  "data_treinamento": "2025-06-27 17:33:14",
+  "metricas": {
+    "auc_validacao": 0.9979,
+    "auc_por_classe_avaliadas": "9/71 classes",
+    "epochs": 100,
+    "batch_size": 32
+  },
+  "arquitetura": {
+    "tipo": "CNN 1D",
+    "input_shape": [
+      12,
+      1000
+    ],
+    "output_classes": 71,
+    "total_parametros": 757511
+  },
+  "dataset": {
+    "nome": "PTB-XL",
+    "frequencia_amostragem": "100 Hz",
+    "duracao_ecg": "10 segundos",
+    "num_derivacoes": 12
+  }
+}
