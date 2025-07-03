@@ -92,3 +92,31 @@ INFO:     10.170.44.1:47834 - "GET / HTTP/1.1" 200 OK
 INFO:     127.0.0.1:36706 - "GET /health HTTP/1.1" 200 OK
 INFO:     127.0.0.1:36720 - "GET / HTTP/1.1" 200 OK
 INFO:     10.170.44.1:34080 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.170.44.1:55772 - "HEAD / HTTP/1.1" 405 Method Not Allowed
+INFO:     10.170.44.1:55788 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:51178 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:51180 - "GET /health HTTP/1.1" 200 OK
+2025-07-02 21:53:54,324 - backend.app.main_complete_final - INFO - Digitalizando ECG para paciente 01
+2025-07-02 21:53:54,365 - backend.app.main_complete_final - INFO - Realizando análise com modelo PTB-XL...
+2025-07-02 21:53:54,366 - backend.app.services.ptbxl_model_service - INFO - ECG preprocessado: (1, 12, 1000)
+2025-07-02 21:53:54,366 - backend.app.services.ptbxl_model_service - INFO - Realizando predição com modelo PTB-XL...
+2025-07-02 21:53:54,434 - backend.app.services.ptbxl_model_service - INFO - Predição concluída - Principais diagnósticos: 1
+2025-07-02 21:53:54,434 - backend.app.main_complete_final - INFO - Análise completa concluída para 01
+INFO:     10.170.44.1:32860 - "POST /upload-and-analyze HTTP/1.1" 200 OK
+INFO:     10.170.44.1:54856 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:54868 - "GET /health HTTP/1.1" 200 OK
+2025-07-02 21:54:29,443 - backend.app.main_complete_final - INFO - Digitalizando ECG para paciente 01
+2025-07-02 21:54:29,472 - backend.app.main_complete_final - INFO - Realizando análise com modelo PTB-XL...
+2025-07-02 21:54:29,473 - backend.app.services.ptbxl_model_service - INFO - ECG preprocessado: (1, 12, 1000)
+2025-07-02 21:54:29,473 - backend.app.services.ptbxl_model_service - INFO - Realizando predição com modelo PTB-XL...
+2025-07-02 21:54:29,543 - backend.app.services.ptbxl_model_service - INFO - Predição concluída - Principais diagnósticos: 1
+2025-07-02 21:54:29,544 - backend.app.main_complete_final - INFO - Análise completa concluída para 01
+INFO:     10.170.44.1:42886 - "POST /upload-and-analyze HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41060 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41066 - "GET /test-radical-fix HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:34344 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50894 - "GET /test-radical-fix HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53558 - "GET /info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56990 - "GET /test-radical-fix HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60290 - "GET /info HTTP/1.1" 200 OK
+INFO:     10.170.44.1:34724 - "GET /health HTTP/1.1" 200 OK
