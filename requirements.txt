@@ -1,46 +1,110 @@
-# Dependências para a plataforma de treinamento de IA
-torch>=1.9.0
-torchvision>=0.10.0
-torchaudio>=0.9.0
-timm>=0.6.0
-transformers>=4.20.0
+# CardioAI Pro - Dependências do Sistema
+# Sistema Avançado de Análise de ECG com IA
 
-# Processamento de dados
-numpy>=1.21.0
-pandas>=1.3.0
-scipy>=1.7.0
-scikit-learn>=1.0.0
-wfdb>=3.4.0
+# Framework Web
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Machine Learning - Deep Learning
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+tensorflow>=2.13.0
+keras>=2.13.0
+
+# Machine Learning - Tradicional
+scikit-learn>=1.3.0
+xgboost>=1.7.0
+lightgbm>=4.0.0
+
+# Processamento Científico
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+
+# Processamento de Sinais ECG
+wfdb>=4.0.0
+PyWavelets>=1.4.0
+neurokit2>=0.2.0
+
+# Explicabilidade
+shap>=0.42.0
+lime>=0.2.0
 
 # Visualização
-matplotlib>=3.5.0
-seaborn>=0.11.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
 plotly>=5.0.0
 
-# API e web
-fastapi>=0.70.0
-uvicorn>=0.15.0
-pydantic>=1.8.0
+# Processamento de Imagens
+opencv-python>=4.8.0
+Pillow>=10.0.0
 
 # Utilitários
-tqdm>=4.62.0
-pyyaml>=6.0
-tensorboard>=2.7.0
-wandb>=0.12.0
+tqdm>=4.65.0
+h5py>=3.0.0
+joblib>=1.3.0
 
-# Processamento de imagens/sinais
-opencv-python>=4.5.0
-Pillow>=8.3.0
+# Validação e Schemas
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Banco de Dados
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+psycopg2-binary>=2.9.0
+
+# Monitoramento e Logging
+structlog>=23.0.0
+sentry-sdk>=1.30.0
+
+# Segurança
+cryptography>=41.0.0
+passlib[bcrypt]>=1.7.0
+python-jose[cryptography]>=3.3.0
+
+# Testes
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+httpx>=0.25.0
+
+# Desenvolvimento
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# FHIR
+fhir.resources>=7.0.0
+fhirclient>=4.1.0
 
 # Formato de dados
-h5py>=3.6.0
-pyarrow>=6.0.0
+pyarrow>=13.0.0
+openpyxl>=3.1.0
 
-# Exportação de modelos
-onnx>=1.10.0
-onnxruntime>=1.9.0
+# Processamento de tempo
+python-dateutil>=2.8.0
+pytz>=2023.3
 
+# HTTP e APIs
+requests>=2.31.0
+aiohttp>=3.8.0
 
+# Configuração
+python-dotenv>=1.0.0
+pyyaml>=6.0
 
-pydantic-settings>=2.0.0
+# Jupyter (para desenvolvimento)
+jupyter>=1.0.0
+ipykernel>=6.25.0
+
+# Métricas e Performance
+psutil>=5.9.0
+memory-profiler>=0.61.0
+
+# Compressão
+lz4>=4.3.0
+zstandard>=0.21.0
 

@@ -1,0 +1,247 @@
+/* CardioAI Pro - Main Styles */
+@import './design-system/globals.css';
+
+/* Reset básico */
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: 'JetBrains Mono', source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Estilos específicos da aplicação */
+.app-container {
+  @apply min-h-screen bg-gray-50;
+}
+
+.main-content {
+  @apply container-medical py-8;
+}
+
+/* Componentes específicos da aplicação */
+.dashboard-card {
+  @apply card-medical p-6 hover-medical;
+}
+
+.patient-card {
+  @apply card-medical p-4 hover-medical;
+}
+
+.ecg-visualization {
+  @apply card-medical p-6 bg-gradient-to-br from-blue-50 to-green-50;
+}
+
+.ai-insight-panel {
+  @apply card-medical p-6 bg-gradient-to-br from-purple-50 to-blue-50;
+}
+
+/* Navegação */
+.nav-link {
+  @apply px-4 py-2 rounded-lg transition-all duration-200;
+  @apply hover:bg-blue-50 hover:text-blue-600;
+}
+
+.nav-link.active {
+  @apply bg-blue-500 text-white shadow-md;
+}
+
+/* Tabelas médicas */
+.medical-table {
+  @apply w-full bg-white rounded-lg shadow-sm overflow-hidden;
+}
+
+.medical-table th {
+  @apply px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider;
+}
+
+.medical-table td {
+  @apply px-6 py-4 whitespace-nowrap text-sm text-gray-900;
+}
+
+.medical-table tr:hover {
+  @apply bg-gray-50;
+}
+
+/* Formulários médicos */
+.medical-form {
+  @apply space-y-6 bg-white p-6 rounded-lg shadow-sm;
+}
+
+.form-group {
+  @apply space-y-2;
+}
+
+.form-label {
+  @apply block text-sm font-medium text-gray-700;
+}
+
+.form-input {
+  @apply input-medical;
+}
+
+.form-error {
+  @apply text-sm text-red-600 mt-1;
+}
+
+/* Modais médicos */
+.modal-overlay {
+  @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50;
+}
+
+.modal-content {
+  @apply bg-white rounded-lg p-6 w-full max-w-md mx-4 animate-scale-in;
+}
+
+/* Notificações */
+.notification {
+  @apply fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 animate-slide-up;
+}
+
+.notification-success {
+  @apply notification bg-green-500 text-white;
+}
+
+.notification-error {
+  @apply notification bg-red-500 text-white;
+}
+
+.notification-warning {
+  @apply notification bg-yellow-500 text-white;
+}
+
+.notification-info {
+  @apply notification bg-blue-500 text-white;
+}
+
+/* Componentes ECG específicos */
+.ecg-chart {
+  width: 100%;
+  height: 400px;
+  @apply bg-white rounded-lg shadow-sm p-4;
+}
+
+.ecg-waveform {
+  @apply animate-ecg-pulse;
+}
+
+/* Estados de loading médico */
+.loading-spinner {
+  @apply flex justify-center items-center h-48;
+}
+
+.loading-medical-spinner {
+  @apply w-8 h-8 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin;
+}
+
+/* Mensagens de status */
+.error-message {
+  @apply text-red-600 text-center p-4 bg-red-50 rounded-lg border border-red-200;
+}
+
+.success-message {
+  @apply text-green-600 text-center p-4 bg-green-50 rounded-lg border border-green-200;
+}
+
+.warning-message {
+  @apply text-yellow-600 text-center p-4 bg-yellow-50 rounded-lg border border-yellow-200;
+}
+
+.info-message {
+  @apply text-blue-600 text-center p-4 bg-blue-50 rounded-lg border border-blue-200;
+}
+
+/* Indicadores de status médico específicos */
+.patient-status-critical {
+  @apply flex items-center space-x-2 text-red-600;
+}
+
+.patient-status-stable {
+  @apply flex items-center space-x-2 text-green-600;
+}
+
+.patient-status-monitoring {
+  @apply flex items-center space-x-2 text-yellow-600;
+}
+
+/* Visualizações de dados médicos */
+.vital-signs-display {
+  @apply grid grid-cols-2 md:grid-cols-4 gap-4;
+}
+
+.vital-sign-card {
+  @apply card-medical p-4 text-center;
+}
+
+.vital-sign-value {
+  @apply text-2xl font-bold text-gray-900;
+}
+
+.vital-sign-label {
+  @apply text-sm text-gray-500 uppercase tracking-wide;
+}
+
+.vital-sign-trend-up {
+  @apply text-green-500;
+}
+
+.vital-sign-trend-down {
+  @apply text-red-500;
+}
+
+.vital-sign-trend-stable {
+  @apply text-gray-500;
+}
+
+/* Componentes de IA */
+.ai-analysis-card {
+  @apply card-medical p-6 bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200;
+}
+
+.ai-confidence-bar {
+  @apply w-full bg-gray-200 rounded-full h-2;
+}
+
+.ai-confidence-fill {
+  @apply bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full transition-all duration-500;
+}
+
+/* Responsividade específica para dispositivos médicos */
+@media (max-width: 768px) {
+  .vital-signs-display {
+    @apply grid-cols-1;
+  }
+  
+  .ecg-chart {
+    height: 300px;
+  }
+  
+  .dashboard-card {
+    @apply p-4;
+  }
+}
+
+/* Modo de alto contraste para acessibilidade médica */
+@media (prefers-contrast: high) {
+  .card-medical {
+    @apply border-2 border-gray-900;
+  }
+  
+  .btn-primary {
+    @apply bg-blue-700 border-2 border-blue-900;
+  }
+  
+  .text-medical-body {
+    @apply text-gray-900;
+  }
+}
+

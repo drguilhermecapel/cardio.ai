@@ -1,0 +1,28 @@
+# .pip-audit.toml
+# Configuração do pip-audit para verificação de segurança
+
+[tool.pip-audit]
+# Incluir descrições das vulnerabilidades
+desc = true
+
+# Formato de saída
+format = "columns"
+
+# Nível de severidade mínimo para reportar
+# Opções: low, medium, high, critical
+vulnerability-service = "osv"
+
+# Ignorar vulnerabilidades específicas (se necessário)
+# ignore-vulns = ["VULN-ID-1", "VULN-ID-2"]
+
+# Verificar apenas produção (não dev)
+# require-hashes = false
+
+# Timeout para requisições
+timeout = 30
+
+# Cache local
+cache-dir = ".pip-audit-cache"
+
+# Excluir pacotes específicos da verificação
+# exclude = ["package-name"]

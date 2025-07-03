@@ -2,7 +2,7 @@
 from typing import Dict, Any, Optional, List
 import numpy as np
 from datetime import datetime
-import logging
+    async def get_analyses_by_patient(self, patient_id: int, limit: int = 50, offset: int = 0):
         """Recupera análises de ECG por paciente."""
         if hasattr(self, 'repository') and self.repository:
             return await self.repository.get_analyses_by_patient(patient_id, limit, offset)

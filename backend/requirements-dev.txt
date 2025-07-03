@@ -1,0 +1,44 @@
+# Development dependencies
+-r requirements.txt
+
+# Additional testing tools
+pytest-xdist==3.5.0
+pytest-timeout==2.2.0
+pytest-benchmark==4.0.0
+pytest-sugar==0.9.7
+coverage[toml]==7.3.2
+
+# Debugging
+ipdb==0.13.13
+django-extensions==3.2.3
+django-debug-toolbar==4.2.0
+
+# Code Quality
+pylint==3.0.2
+bandit==1.7.5
+safety==2.3.5
+
+# Documentation
+sphinx==7.2.6
+sphinx-rtd-theme==2.0.0
+sphinx-autodoc-typehints==1.25.2
+
+# Performance Profiling
+memory-profiler==0.61.0
+line-profiler==4.1.2
+py-spy==0.3.14
+
+# Load Testing
+locust==2.17.0
+
+# Database Tools
+pgcli==4.0.1
+mycli==1.27.0
+
+# API Testing
+tavern==2.9.1
+dredd_hooks==0.2.0
+
+# Mock Data Generation
+factory-boy==3.3.0
+mimesis==11.1.0

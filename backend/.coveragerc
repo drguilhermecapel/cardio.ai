@@ -1,0 +1,36 @@
+[run]
+source = app
+omit = 
+    */tests/*
+    */migrations/*
+    */__init__.py
+    */alembic/*
+    */venv/*
+    */virtualenv/*
+    */.venv/*
+    */site-packages/*
+
+[report]
+precision = 2
+show_missing = True
+skip_covered = False
+skip_empty = True
+
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    class .*\(Protocol\):
+    @abstractmethod
+    @abstract
+    except ImportError:
+    pass
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml
