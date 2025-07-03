@@ -61,7 +61,8 @@ async def startup_event():
     try:
         # Inicializar carregador de modelo
         logger.info("📊 Carregando modelo neural .h5...")
-        model_loader = ModelLoaderRobust()
+        model_path = "/home/ubuntu/cardio_ai_repo/models/ecg_model_final.h5"
+        model_loader = ModelLoaderRobust(model_path)
         
         if model_loader.load_model():
             logger.info("✅ Modelo neural carregado e validado para uso médico")
@@ -459,7 +460,7 @@ async def health_check():
         "version": "3.1.0",
         "medical_grade": True,
         "model_loaded": model_loader is not None and model_loader.model is not None,
-        "model_validated": model_loader is not None and model_loader.model_validated,
+        "model_validated": model_loader is not None and hasattr(model_loader, 'validation_results') and model_loader.validation_results.get('overall_grade') is not None,
         "monitoring_active": medical_monitor is not None and medical_monitor.monitoring_active,
         "digitizer_ready": digitizer is not None
     }

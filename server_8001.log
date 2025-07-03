@@ -1,0 +1,36 @@
+2025-07-02 22:41:40.686985: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-07-02 22:41:40.687936: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
+2025-07-02 22:41:40.692369: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
+2025-07-02 22:41:40.705134: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1751510500.727897   17283 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1751510500.734387   17283 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1751510500.751830   17283 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751510500.751871   17283 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751510500.751874   17283 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751510500.751876   17283 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-07-02 22:41:40.757004: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+INFO:     Started server process [17283]
+INFO:     Waiting for application startup.
+2025-07-02 22:41:44,170 - backend.app.main_medical_grade_fixed - INFO - 🏥 Iniciando CardioAI Pro - Medical Grade CORRIGIDO...
+2025-07-02 22:41:44,170 - backend.app.main_medical_grade_fixed - INFO - 📊 Carregando modelo neural .h5...
+2025-07-02 22:41:44,170 - backend.app.main_medical_grade_fixed - ERROR - ❌ Erro na inicialização: ModelLoaderRobust.__init__() missing 1 required positional argument: 'model_path'
+ERROR:    Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 692, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/lib/python3.11/contextlib.py", line 204, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 569, in __aenter__
+    await self._router.startup()
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 669, in startup
+    await handler()
+  File "/home/ubuntu/cardio_ai_repo/backend/app/main_medical_grade_fixed.py", line 64, in startup_event
+    model_loader = ModelLoaderRobust()
+                   ^^^^^^^^^^^^^^^^^^^
+TypeError: ModelLoaderRobust.__init__() missing 1 required positional argument: 'model_path'
+
+ERROR:    Application startup failed. Exiting.

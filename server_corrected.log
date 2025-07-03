@@ -1,0 +1,207 @@
+2025-07-02 22:42:49.229673: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-07-02 22:42:49.230559: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
+2025-07-02 22:42:49.234971: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:32] Could not find cuda drivers on your machine, GPU will not be used.
+2025-07-02 22:42:49.247387: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1751510569.269283   17408 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1751510569.275557   17408 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1751510569.292404   17408 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751510569.292449   17408 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751510569.292452   17408 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1751510569.292454   17408 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-07-02 22:42:49.297550: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+INFO:     Started server process [17408]
+INFO:     Waiting for application startup.
+2025-07-02 22:42:52,614 - backend.app.main_medical_grade_fixed - INFO - 🏥 Iniciando CardioAI Pro - Medical Grade CORRIGIDO...
+2025-07-02 22:42:52,614 - backend.app.main_medical_grade_fixed - INFO - 📊 Carregando modelo neural .h5...
+2025-07-02 22:42:52,614 - backend.app.services.model_loader_robust - INFO - Inicializando ModelLoaderRobust para: /home/ubuntu/cardio_ai_repo/models/ecg_model_final.h5
+2025-07-02 22:42:52,614 - backend.app.services.model_loader_robust - INFO - Iniciando carregamento robusto do modelo .h5...
+2025-07-02 22:42:52,614 - backend.app.services.model_loader_robust - INFO - Arquivo do modelo: 8.7 MB
+2025-07-02 22:42:52,641 - backend.app.services.model_loader_robust - INFO - Hash do modelo: e7e89ca6d02bbb34...
+2025-07-02 22:42:52.642100: E external/local_xla/xla/stream_executor/cuda/cuda_platform.cc:51] failed call to cuInit: INTERNAL: CUDA error: Failed call to cuInit: UNKNOWN ERROR (303)
+2025-07-02 22:42:52,642 - backend.app.services.model_loader_robust - INFO - TensorFlow configurado para uso médico
+2025-07-02 22:42:52,642 - backend.app.services.model_loader_robust - INFO - Carregando modelo TensorFlow/Keras...
+2025-07-02 22:42:52,836 - backend.app.services.model_loader_robust - INFO - Classes carregadas: 71 condições
+2025-07-02 22:42:52,836 - backend.app.services.model_loader_robust - INFO - Iniciando validação médica do modelo...
+2025-07-02 22:42:52.898838: E tensorflow/core/framework/node_def_util.cc:680] NodeDef mentions attribute use_unbounded_threadpool which is not in the op definition: Op<name=MapDataset; signature=input_dataset:variant, other_arguments: -> handle:variant; attr=f:func; attr=Targuments:list(type),min=0; attr=output_types:list(type),min=1; attr=output_shapes:list(shape),min=1; attr=use_inter_op_parallelism:bool,default=true; attr=preserve_cardinality:bool,default=false; attr=force_synchronous:bool,default=false; attr=metadata:string,default=""> This may be expected if your graph generating binary is newer  than this binary. Unknown attributes will be ignored. NodeDef: {{node ParallelMapDatasetV2/_14}}
+2025-07-02 22:42:53,219 - backend.app.services.model_loader_robust - INFO - Validação médica: 5/6 testes aprovados
+2025-07-02 22:42:53,220 - backend.app.services.model_loader_robust - INFO - Grau médico: B - Aprovado com restrições
+2025-07-02 22:42:53,220 - backend.app.services.model_loader_robust - INFO - ✅ input_shape: Dimensões de entrada corretas
+2025-07-02 22:42:53,220 - backend.app.services.model_loader_robust - INFO - ✅ output_classes: Classes corretas: 71
+2025-07-02 22:42:53,220 - backend.app.services.model_loader_robust - INFO - ✅ prediction_shape: Predição com formato correto
+2025-07-02 22:42:53,220 - backend.app.services.model_loader_robust - INFO - ✅ probability_range: Saída em formato de probabilidade
+2025-07-02 22:42:53,220 - backend.app.services.model_loader_robust - INFO - ❌ discrimination: Modelo não discrimina adequadamente
+2025-07-02 22:42:53,220 - backend.app.services.model_loader_robust - INFO - ✅ prediction_speed: Tempo adequado: 0.07s
+2025-07-02 22:42:53,220 - backend.app.services.model_loader_robust - INFO - ✅ Modelo carregado e validado com sucesso para uso médico!
+2025-07-02 22:42:53,220 - backend.app.main_medical_grade_fixed - INFO - ✅ Modelo neural carregado e validado para uso médico
+2025-07-02 22:42:53,220 - backend.app.main_medical_grade_fixed - INFO - 📈 Iniciando monitoramento médico...
+2025-07-02 22:42:53,220 - backend.app.services.medical_monitoring - INFO - Banco de dados médico inicializado
+2025-07-02 22:42:53,220 - backend.app.services.medical_monitoring - INFO - Sistema de monitoramento médico inicializado
+2025-07-02 22:42:53,221 - backend.app.services.medical_monitoring - INFO - Monitoramento médico iniciado
+2025-07-02 22:42:53,221 - backend.app.main_medical_grade_fixed - INFO - ✅ Monitoramento médico ativo
+2025-07-02 22:42:53,221 - backend.app.main_medical_grade_fixed - INFO - 🖼️ Inicializando digitalizador de ECG...
+2025-07-02 22:42:53,221 - backend.app.main_medical_grade_fixed - INFO - ✅ Digitalizador de ECG pronto
+2025-07-02 22:42:53,221 - backend.app.main_medical_grade_fixed - INFO - 🎉 CardioAI Pro - Medical Grade CORRIGIDO inicializado com sucesso!
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     10.170.44.1:39774 - "GET /monitoring/dashboard HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53784 - "GET /health HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/dist-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/applications.py", line 112, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/errors.py", line 187, in __call__
+    raise exc
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 714, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 734, in app
+    await route.handle(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/routing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/cardio_ai_repo/backend/app/main_medical_grade_fixed.py", line 463, in health_check
+    "model_validated": model_loader is not None and model_loader.model_validated,
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ModelLoaderRobust' object has no attribute 'model_validated'
+INFO:     127.0.0.1:49968 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:45404 - "GET / HTTP/1.1" 200 OK
+INFO:     10.170.44.1:45418 - "GET /health HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/dist-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/applications.py", line 112, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/errors.py", line 187, in __call__
+    raise exc
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 714, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 734, in app
+    await route.handle(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/routing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/cardio_ai_repo/backend/app/main_medical_grade_fixed.py", line 463, in health_check
+    "model_validated": model_loader is not None and model_loader.model_validated,
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ModelLoaderRobust' object has no attribute 'model_validated'
+INFO:     10.170.44.1:49152 - "GET /monitoring/dashboard HTTP/1.1" 404 Not Found
+INFO:     10.170.44.1:38768 - "GET /monitoring/dashboard HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49302 - "HEAD /health HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:49316 - "GET /health HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/dist-packages/uvicorn/protocols/http/h11_impl.py", line 403, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/applications.py", line 112, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/errors.py", line 187, in __call__
+    raise exc
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/middleware/exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 714, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 734, in app
+    await route.handle(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/usr/local/lib/python3.11/dist-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/usr/local/lib/python3.11/dist-packages/starlette/routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/fastapi/routing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/cardio_ai_repo/backend/app/main_medical_grade_fixed.py", line 463, in health_check
+    "model_validated": model_loader is not None and hasattr(model_loader, 'validation_results') and model_loader.validation_results.get('overall_grade') is not None,
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ModelLoaderRobust' object has no attribute 'model_validated'
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [17408]
