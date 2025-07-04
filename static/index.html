@@ -330,13 +330,13 @@
                         <div class="grid grid-cols-2 gap-4 text-sm">
                             <div>
                                 <strong>Paciente:</strong> ${result.patient_id}<br>
-                                <strong>Arquivo:</strong> ${result.image_info.filename}<br>
-                                <strong>Tamanho:</strong> ${(result.image_info.size_bytes / 1024).toFixed(1)} KB
+                                <strong>Processo:</strong> ${result.process_id}<br>
+                                <strong>Data:</strong> ${new Date(result.timestamp).toLocaleString()}
                             </div>
                             <div>
-                                <strong>Derivações:</strong> ${result.digitization.leads_extracted}<br>
+                                <strong>Derivações:</strong> ${result.digitization.leads_detected}<br>
                                 <strong>Qualidade:</strong> <span class="text-${qualityColor}-600 font-semibold">${(result.digitization.quality_score * 100).toFixed(1)}%</span><br>
-                                <strong>Grade:</strong> ${result.digitization.grid_detected ? 'Detectada' : 'Não detectada'}
+                                <strong>Duração:</strong> ${result.digitization.duration_seconds}s
                             </div>
                         </div>
                     </div>
