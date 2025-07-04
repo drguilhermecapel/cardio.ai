@@ -1,4 +1,4 @@
-// Advanced AI Visual Analysis Component
+// Advanced AI Visual Analysis Component with SHAP Explanations
 // CardioAI Pro - Fusão entre cardiologia e inteligência artificial
 
 import React, { useState, useEffect } from 'react'
@@ -8,7 +8,10 @@ import {
   Typography, 
   Button, 
   Badge,
-  AIGlow 
+  AIGlow,
+  Box,
+  CircularProgress,
+  Alert
 } from '../ui/BasicComponents'
 import { AIProcessingAnimation, PulseAnimation } from '../animations/MedicalAnimations'
 
@@ -22,6 +25,20 @@ interface AnalysisLayer {
   color: string
 }
 
+interface Explanation {
+  shap_plot_base64?: { [key: string]: string | null }
+  force_plots?: { [key: string]: string | null }
+  waterfall_plots?: { [key: string]: string | null }
+  feature_importance?: { [key: string]: { [key: string]: number } }
+  success?: boolean
+  error?: string
+}
+
+interface DiagnosticInfo {
+  class: string
+  probability: number
+}
+
 interface AIAnalysisResult {
   id: string
   patientId: string
@@ -31,11 +48,17 @@ interface AIAnalysisResult {
   layers: AnalysisLayer[]
   recommendations: string[]
   criticalFindings: string[]
+  diagnostics?: DiagnosticInfo[]
+  explanation?: Explanation
 }
 
 interface VisualAIAnalysisProps {
   patientData?: any
   ecgData?: any
+  diagnostics?: DiagnosticInfo[] | null
+  explanation?: Explanation | null
+  isLoading?: boolean
+  error?: string | null
   onAnalysisComplete?: (result: AIAnalysisResult) => void
   autoStart?: boolean
   className?: string
@@ -44,6 +67,10 @@ interface VisualAIAnalysisProps {
 export const VisualAIAnalysis: React.FC<VisualAIAnalysisProps> = ({
   patientData,
   ecgData,
+  diagnostics,
+  explanation,
+  isLoading = false,
+  error = null,
   onAnalysisComplete,
   autoStart = false,
   className = ''
@@ -52,6 +79,7 @@ export const VisualAIAnalysis: React.FC<VisualAIAnalysisProps> = ({
   const [currentLayer, setCurrentLayer] = useState(0)
   const [analysisResult, setAnalysisResult] = useState<AIAnalysisResult | null>(null)
   const [progress, setProgress] = useState(0)
+  const [showExplanations, setShowExplanations] = useState(false)
 
   // Analysis layers configuration
   const analysisLayers: AnalysisLayer[] = [
@@ -113,6 +141,29 @@ export const VisualAIAnalysis: React.FC<VisualAIAnalysisProps> = ({
 
   const [layers, setLayers] = useState<AnalysisLayer[]>(analysisLayers)
 
+  // Handle loading state
+  if (isLoading) {
+    return (
+      <Card variant="ai">
+        <CardContent className="p-6 text-center">
+          <CircularProgress />
+          <Typography variant="h6" className="mt-4">
+            Analisando ECG com IA...
+          </Typography>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Handle error state
+  if (error) {
+    return (
+      <Alert severity="error" className="mb-4">
+        {error}
+      </Alert>
+    )
+  }
+
   // Simulate AI analysis process
   const runAnalysis = async () => {
     setIsAnalyzing(true)
@@ -164,7 +215,9 @@ export const VisualAIAnalysis: React.FC<VisualAIAnalysisProps> = ({
         'Considerar ajuste de medicação',
         'Acompanhamento em 30 dias'
       ],
-      criticalFindings: Math.random() > 0.7 ? ['Prolongamento QT detectado'] : []
+      criticalFindings: Math.random() > 0.7 ? ['Prolongamento QT detectado'] : [],
+      diagnostics: diagnostics || [],
+      explanation: explanation || null
     }
 
     setAnalysisResult(result)
@@ -245,7 +298,7 @@ export const VisualAIAnalysis: React.FC<VisualAIAnalysisProps> = ({
                 Análise Visual de IA
               </Typography>
               <Typography variant="body2" className="text-purple-600">
-                Processamento multicamadas com inteligência artificial
+                Processamento multicamadas com inteligência artificial e explicabilidade
               </Typography>
             </div>
             
@@ -282,6 +335,112 @@ export const VisualAIAnalysis: React.FC<VisualAIAnalysisProps> = ({
           )}
         </CardContent>
       </Card>
+
+      {/* Diagnostics Results */}
+      {diagnostics && diagnostics.length > 0 && (
+        <Card variant="medical">
+          <CardContent className="p-6">
+            <Typography variant="h6" className="font-bold text-gray-900 mb-4">
+              🔍 Diagnósticos da IA
+            </Typography>
+            
+            {diagnostics.map((diag, index) => (
+              <Box key={index} className="mb-4 p-4 bg-blue-50 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <Typography variant="h6" className="font-bold text-blue-800">
+                    {diag.class}
+                  </Typography>
+                  <Badge 
+                    variant={diag.probability > 0.8 ? "success" : diag.probability > 0.6 ? "warning" : "error"}
+                    className="text-sm"
+                  >
+                    {(diag.probability * 100).toFixed(1)}%
+                  </Badge>
+                </div>
+                
+                {/* NOVO BLOCO PARA EXIBIR A EXPLICAÇÃO SHAP */}
+                {explanation?.force_plots?.[diag.class] && (
+                  <Box className="mt-4 border border-gray-300 rounded-lg p-3 bg-white">
+                    <Typography variant="subtitle2" className="font-bold text-gray-700 mb-2">
+                      🧠 Justificativa do Modelo (SHAP Force Plot) para "{diag.class}"
+                    </Typography>
+                    <img 
+                      src={explanation.force_plots[diag.class]!} 
+                      alt={`Explicação SHAP para ${diag.class}`}
+                      className="w-full h-auto rounded border"
+                    />
+                  </Box>
+                )}
+
+                {/* Waterfall Plot */}
+                {explanation?.waterfall_plots?.[diag.class] && (
+                  <Box className="mt-4 border border-gray-300 rounded-lg p-3 bg-white">
+                    <Typography variant="subtitle2" className="font-bold text-gray-700 mb-2">
+                      📊 Análise de Contribuição (SHAP Waterfall) para "{diag.class}"
+                    </Typography>
+                    <img 
+                      src={explanation.waterfall_plots[diag.class]!} 
+                      alt={`Waterfall SHAP para ${diag.class}`}
+                      className="w-full h-auto rounded border"
+                    />
+                  </Box>
+                )}
+
+                {/* Feature Importance */}
+                {explanation?.feature_importance?.[diag.class] && (
+                  <Box className="mt-4 border border-gray-300 rounded-lg p-3 bg-white">
+                    <Typography variant="subtitle2" className="font-bold text-gray-700 mb-2">
+                      📈 Importância das Features para "{diag.class}"
+                    </Typography>
+                    <div className="space-y-2">
+                      {Object.entries(explanation.feature_importance[diag.class])
+                        .slice(0, 5) // Mostrar apenas top 5
+                        .map(([feature, importance]) => (
+                          <div key={feature} className="flex items-center justify-between">
+                            <Typography variant="caption" className="text-gray-600">
+                              {feature}
+                            </Typography>
+                            <div className="flex items-center space-x-2">
+                              <div className="w-20 bg-gray-200 rounded-full h-2">
+                                <div 
+                                  className="bg-blue-500 h-2 rounded-full"
+                                  style={{ width: `${(importance * 100)}%` }}
+                                />
+                              </div>
+                              <Typography variant="caption" className="text-gray-700 font-medium">
+                                {importance.toFixed(3)}
+                              </Typography>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </Box>
+                )}
+                {/* FIM DO NOVO BLOCO */}
+              </Box>
+            ))}
+
+            {/* Explanation Controls */}
+            {explanation && (
+              <div className="mt-4 flex space-x-3">
+                <Button 
+                  variant="outlined" 
+                  color="primary"
+                  onClick={() => setShowExplanations(!showExplanations)}
+                >
+                  {showExplanations ? '🔽 Ocultar' : '🔼 Mostrar'} Explicações Detalhadas
+                </Button>
+                
+                {explanation.success === false && (
+                  <Alert severity="warning" className="flex-1">
+                    Explicação não disponível: {explanation.error}
+                  </Alert>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Analysis Layers */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

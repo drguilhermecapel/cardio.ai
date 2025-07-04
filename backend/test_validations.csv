@@ -1,0 +1,2 @@
+timestamp,ecg_id,ai_diagnosis,ai_probability,validator_id,is_correct,corrected_diagnosis,comments,validation_session_id,model_version,confidence_score,processing_time_ms,additional_metadata
+2025-07-04T21:44:28.665755,test_ecg_001,Normal,0.95,dr_teste,True,,Teste de validação,val_20250704_174428_test_ecg_001,,,,

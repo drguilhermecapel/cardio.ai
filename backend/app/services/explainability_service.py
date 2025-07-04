@@ -1,365 +1,406 @@
-"""
-Serviço de Explicabilidade para CardioAI
-Implementa Grad-CAM, SHAP e outras técnicas de interpretabilidade
-"""
-
-import logging
+# backend/app/services/explainability_service.py
+import shap
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-from typing import Dict, List, Optional, Tuple, Any
-import tensorflow as tf
-from tensorflow import keras
-import torch
-import torch.nn.functional as F
-from datetime import datetime
-import io
 import base64
-from PIL import Image
+from io import BytesIO
+from typing import Any, List, Dict, Optional
+import logging
+import warnings
+warnings.filterwarnings('ignore')
 
 logger = logging.getLogger(__name__)
 
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except ImportError:
-    SHAP_AVAILABLE = False
-    logger.warning("SHAP não disponível. Instale com: pip install shap")
-
-
 class ExplainabilityService:
-    """Serviço para explicabilidade de modelos de ECG."""
-    
-    def __init__(self):
-        self.explainers = {}
-        
-    def generate_gradcam(self, model, ecg_data: np.ndarray, 
-                        target_class: Optional[int] = None) -> Dict[str, Any]:
-        """Gera mapa de ativação Grad-CAM para modelo Keras."""
-        try:
-            if not isinstance(model, keras.Model):
-                raise ValueError("Grad-CAM suporta apenas modelos Keras")
-            
-            # Preparar dados
-            if ecg_data.ndim == 1:
-                ecg_data = ecg_data.reshape(1, -1, 1)
-            elif ecg_data.ndim == 2:
-                ecg_data = ecg_data.reshape(ecg_data.shape[0], -1, 1)
-            
-            # Encontrar última camada convolucional
-            last_conv_layer = None
-            for layer in reversed(model.layers):
-                if 'conv' in layer.name.lower():
-                    last_conv_layer = layer
-                    break
-            
-            if last_conv_layer is None:
-                raise ValueError("Nenhuma camada convolucional encontrada")
-            
-            # Criar modelo para extração de features
-            grad_model = keras.Model(
-                inputs=model.input,
-                outputs=[last_conv_layer.output, model.output]
-            )
-            
-            # Calcular gradientes
-            with tf.GradientTape() as tape:
-                conv_outputs, predictions = grad_model(ecg_data)
-                
-                if target_class is None:
-                    target_class = tf.argmax(predictions[0])
-                
-                class_output = predictions[:, target_class]
-            
-            # Gradientes da classe em relação às features
-            grads = tape.gradient(class_output, conv_outputs)
-            
-            # Pooling dos gradientes
-            pooled_grads = tf.reduce_mean(grads, axis=(0, 1))
-            
-            # Multiplicar features pelos gradientes
-            conv_outputs = conv_outputs[0]
-            heatmap = tf.reduce_sum(tf.multiply(pooled_grads, conv_outputs), axis=-1)
-            
-            # Normalizar heatmap
-            heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
-            
-            # Converter para numpy
-            heatmap_np = heatmap.numpy()
-            
-            # Redimensionar para tamanho original do ECG
-            original_length = ecg_data.shape[1]
-            heatmap_resized = np.interp(
-                np.linspace(0, len(heatmap_np)-1, original_length),
-                np.arange(len(heatmap_np)),
-                heatmap_np
-            )
-            
-            # Gerar visualização
-            visualization = self._create_gradcam_visualization(
-                ecg_data[0, :, 0], heatmap_resized
-            )
-            
-            return {
-                "heatmap": heatmap_resized.tolist(),
-                "target_class": int(target_class),
-                "visualization": visualization,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro no Grad-CAM: {str(e)}")
-            return {"error": str(e)}
-    
-    def generate_shap_explanation(self, model, ecg_data: np.ndarray, 
-                                 background_data: Optional[np.ndarray] = None) -> Dict[str, Any]:
-        """Gera explicação SHAP para o modelo."""
-        try:
-            if not SHAP_AVAILABLE:
-                raise ImportError("SHAP não está disponível")
-            
-            # Preparar dados
-            if ecg_data.ndim == 1:
-                ecg_data = ecg_data.reshape(1, -1)
-            
-            # Criar explainer
-            if background_data is None:
-                # Usar dados sintéticos como background
-                background_data = np.random.normal(0, 1, (100, ecg_data.shape[1]))
-            
-            # Função de predição wrapper
-            def predict_fn(x):
-                if hasattr(model, 'predict'):
-                    return model.predict(x)
-                else:
-                    # PyTorch
-                    with torch.no_grad():
-                        tensor_x = torch.FloatTensor(x)
-                        return model(tensor_x).numpy()
-            
-            # Criar explainer
-            explainer = shap.Explainer(predict_fn, background_data)
-            
-            # Calcular valores SHAP
-            shap_values = explainer(ecg_data)
-            
-            # Gerar visualização
-            visualization = self._create_shap_visualization(
-                ecg_data[0], shap_values.values[0]
-            )
-            
-            return {
-                "shap_values": shap_values.values.tolist(),
-                "base_values": shap_values.base_values.tolist(),
-                "data": ecg_data.tolist(),
-                "visualization": visualization,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro no SHAP: {str(e)}")
-            return {"error": str(e)}
-    
-    def generate_feature_importance(self, model, ecg_data: np.ndarray) -> Dict[str, Any]:
-        """Gera análise de importância de características."""
-        try:
-            # Análise de sensibilidade por perturbação
-            baseline_pred = self._get_prediction(model, ecg_data)
-            
-            importance_scores = []
-            window_size = max(1, len(ecg_data) // 50)  # 50 janelas
-            
-            for i in range(0, len(ecg_data), window_size):
-                # Criar versão perturbada
-                perturbed = ecg_data.copy()
-                end_idx = min(i + window_size, len(ecg_data))
-                perturbed[i:end_idx] = np.mean(ecg_data)  # Substituir por média
-                
-                # Calcular diferença na predição
-                perturbed_pred = self._get_prediction(model, perturbed)
-                importance = np.abs(baseline_pred - perturbed_pred)
-                importance_scores.append(float(importance))
-            
-            # Criar visualização
-            visualization = self._create_importance_visualization(
-                ecg_data, importance_scores, window_size
-            )
-            
-            return {
-                "importance_scores": importance_scores,
-                "window_size": window_size,
-                "baseline_prediction": float(baseline_pred),
-                "visualization": visualization,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro na análise de importância: {str(e)}")
-            return {"error": str(e)}
-    
-    def _get_prediction(self, model, ecg_data: np.ndarray) -> float:
-        """Obtém predição do modelo."""
-        if ecg_data.ndim == 1:
-            ecg_data = ecg_data.reshape(1, -1)
-        
-        if hasattr(model, 'predict'):
-            pred = model.predict(ecg_data)
-        else:
-            with torch.no_grad():
-                tensor_data = torch.FloatTensor(ecg_data)
-                pred = model(tensor_data).numpy()
-        
-        return float(np.max(pred))
-    
-    def _create_gradcam_visualization(self, ecg_signal: np.ndarray, 
-                                    heatmap: np.ndarray) -> str:
-        """Cria visualização do Grad-CAM."""
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-        
-        # Sinal ECG original
-        time_axis = np.arange(len(ecg_signal))
-        ax1.plot(time_axis, ecg_signal, 'b-', linewidth=1)
-        ax1.set_title('Sinal ECG Original')
-        ax1.set_ylabel('Amplitude')
-        ax1.grid(True, alpha=0.3)
-        
-        # Heatmap sobreposto
-        im = ax2.imshow(heatmap.reshape(1, -1), cmap='jet', alpha=0.7, 
-                       aspect='auto', extent=[0, len(ecg_signal), -1, 1])
-        ax2.plot(time_axis, ecg_signal / np.max(np.abs(ecg_signal)), 'k-', linewidth=2)
-        ax2.set_title('Grad-CAM: Regiões Importantes')
-        ax2.set_xlabel('Amostras')
-        ax2.set_ylabel('Amplitude Normalizada')
-        
-        # Colorbar
-        plt.colorbar(im, ax=ax2, label='Importância')
-        
-        plt.tight_layout()
-        
-        # Converter para base64
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
-        buffer.seek(0)
-        image_base64 = base64.b64encode(buffer.getvalue()).decode()
-        plt.close()
-        
-        return image_base64
-    
-    def _create_shap_visualization(self, ecg_signal: np.ndarray, 
-                                  shap_values: np.ndarray) -> str:
-        """Cria visualização SHAP."""
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10))
-        
-        time_axis = np.arange(len(ecg_signal))
-        
-        # Sinal original
-        ax1.plot(time_axis, ecg_signal, 'b-', linewidth=1)
-        ax1.set_title('Sinal ECG Original')
-        ax1.set_ylabel('Amplitude')
-        ax1.grid(True, alpha=0.3)
-        
-        # Valores SHAP
-        colors = ['red' if x > 0 else 'blue' for x in shap_values]
-        ax2.bar(time_axis, shap_values, color=colors, alpha=0.7, width=1)
-        ax2.set_title('Valores SHAP (Contribuição para Predição)')
-        ax2.set_ylabel('Valor SHAP')
-        ax2.axhline(y=0, color='black', linestyle='-', alpha=0.3)
-        ax2.grid(True, alpha=0.3)
-        
-        # Combinado
-        ax3.plot(time_axis, ecg_signal, 'k-', linewidth=1, alpha=0.7, label='ECG')
-        ax3_twin = ax3.twinx()
-        ax3_twin.fill_between(time_axis, 0, shap_values, 
-                             color='red', alpha=0.3, label='SHAP')
-        ax3.set_title('ECG + Contribuições SHAP')
-        ax3.set_xlabel('Amostras')
-        ax3.set_ylabel('Amplitude ECG')
-        ax3_twin.set_ylabel('Valor SHAP')
-        ax3.legend(loc='upper left')
-        ax3_twin.legend(loc='upper right')
-        
-        plt.tight_layout()
-        
-        # Converter para base64
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
-        buffer.seek(0)
-        image_base64 = base64.b64encode(buffer.getvalue()).decode()
-        plt.close()
-        
-        return image_base64
-    
-    def _create_importance_visualization(self, ecg_signal: np.ndarray, 
-                                       importance_scores: List[float], 
-                                       window_size: int) -> str:
-        """Cria visualização de importância de características."""
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-        
-        time_axis = np.arange(len(ecg_signal))
-        
-        # Sinal ECG
-        ax1.plot(time_axis, ecg_signal, 'b-', linewidth=1)
-        ax1.set_title('Sinal ECG Original')
-        ax1.set_ylabel('Amplitude')
-        ax1.grid(True, alpha=0.3)
-        
-        # Importância por janelas
-        window_centers = np.arange(0, len(ecg_signal), window_size) + window_size // 2
-        window_centers = window_centers[:len(importance_scores)]
-        
-        ax2.bar(window_centers, importance_scores, width=window_size, 
-               alpha=0.7, color='orange')
-        ax2.set_title('Importância por Região (Análise de Sensibilidade)')
-        ax2.set_xlabel('Amostras')
-        ax2.set_ylabel('Score de Importância')
-        ax2.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        
-        # Converter para base64
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
-        buffer.seek(0)
-        image_base64 = base64.b64encode(buffer.getvalue()).decode()
-        plt.close()
-        
-        return image_base64
-    
-    def generate_comprehensive_report(self, model, ecg_data: np.ndarray, 
-                                    model_name: str) -> Dict[str, Any]:
-        """Gera relatório completo de explicabilidade."""
-        try:
-            report = {
-                "model_name": model_name,
-                "timestamp": datetime.now().isoformat(),
-                "ecg_length": len(ecg_data),
-                "analyses": {}
-            }
-            
-            # Grad-CAM (se aplicável)
-            if hasattr(model, 'layers'):
-                gradcam_result = self.generate_gradcam(model, ecg_data)
-                if "error" not in gradcam_result:
-                    report["analyses"]["gradcam"] = gradcam_result
-            
-            # SHAP (se disponível)
-            if SHAP_AVAILABLE:
-                shap_result = self.generate_shap_explanation(model, ecg_data)
-                if "error" not in shap_result:
-                    report["analyses"]["shap"] = shap_result
-            
-            # Análise de importância
-            importance_result = self.generate_feature_importance(model, ecg_data)
-            if "error" not in importance_result:
-                report["analyses"]["feature_importance"] = importance_result
-            
-            return report
-            
-        except Exception as e:
-            logger.error(f"Erro no relatório de explicabilidade: {str(e)}")
-            return {"error": str(e)}
+    """
+    Serviço para gerar explicações para as predições do modelo de ECG.
+    Utiliza o SHAP (SHapley Additive exPlanations) para maior interpretabilidade.
+    """
 
+    def __init__(self, model: Any, training_data_summary: np.ndarray, feature_names: List[str]):
+        """
+        Inicializa o serviço de explicabilidade.
 
-# Instância global do serviço
-explainability_service = ExplainabilityService()
+        Args:
+            model: O modelo de ML treinado (deve ter um método `predict` ou `predict_proba`).
+            training_data_summary: Um resumo dos dados de treinamento (e.g., SHAP KernelExplainer summary).
+                                   Pode ser criado com `shap.kmeans(training_data, 10)`.
+            feature_names: Nomes das derivações do ECG (e.g., ['DI', 'DII', ..., 'V6']).
+        """
+        try:
+            logger.info("Inicializando ExplainabilityService...")
+            
+            self.model = model
+            self.feature_names = feature_names
+            
+            # Verificar se o modelo tem o método necessário
+            if hasattr(model, 'predict_proba'):
+                self.predict_function = model.predict_proba
+            elif hasattr(model, 'predict'):
+                self.predict_function = model.predict
+            else:
+                raise ValueError("Modelo deve ter método 'predict' ou 'predict_proba'")
+            
+            # O ideal é usar um explainer adequado ao tipo de modelo.
+            # KernelExplainer é agnóstico ao modelo.
+            # TreeExplainer é muito mais rápido para modelos baseados em árvores (XGBoost, RandomForest).
+            
+            # Tentar usar TreeExplainer primeiro (mais rápido)
+            try:
+                self.explainer = shap.TreeExplainer(model)
+                self.explainer_type = "tree"
+                logger.info("✅ TreeExplainer inicializado com sucesso")
+            except Exception as tree_error:
+                logger.warning(f"TreeExplainer falhou: {tree_error}. Usando KernelExplainer...")
+                # Fallback para KernelExplainer
+                self.explainer = shap.KernelExplainer(self.predict_function, training_data_summary)
+                self.explainer_type = "kernel"
+                logger.info("✅ KernelExplainer inicializado com sucesso")
+            
+            logger.info("✅ ExplainabilityService inicializado com sucesso.")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao inicializar ExplainabilityService: {e}")
+            raise
+
+    def explain_instance(self, ecg_instance: np.ndarray, class_names: List[str], 
+                        max_display: int = 10) -> Dict[str, Any]:
+        """
+        Gera uma explicação SHAP para uma única instância de ECG.
+
+        Args:
+            ecg_instance: A amostra de ECG a ser explicada (formato esperado pelo modelo).
+            class_names: Lista de nomes das classes/diagnósticos.
+            max_display: Número máximo de features a exibir na explicação.
+
+        Returns:
+            Um dicionário contendo os valores SHAP e uma visualização em base64.
+        """
+        try:
+            if ecg_instance.ndim == 1:
+                ecg_instance = ecg_instance.reshape(1, -1)
+                
+            logger.info("Gerando valores SHAP para a instância de ECG...")
+            
+            # Gerar valores SHAP
+            if self.explainer_type == "tree":
+                shap_values = self.explainer.shap_values(ecg_instance)
+            else:
+                shap_values = self.explainer.shap_values(ecg_instance)
+            
+            logger.info("✅ Valores SHAP gerados.")
+
+            # Processar valores SHAP baseado no tipo de saída
+            if isinstance(shap_values, list):
+                # Multi-classe: shap_values é uma lista
+                processed_shap_values = shap_values
+                expected_values = self.explainer.expected_value
+            else:
+                # Binário ou regressão: shap_values é um array
+                processed_shap_values = [shap_values]
+                expected_values = [self.explainer.expected_value]
+
+            # Gerar visualizações
+            explanations = self._generate_explanations(
+                processed_shap_values, 
+                expected_values,
+                ecg_instance, 
+                class_names, 
+                max_display
+            )
+
+            return {
+                "success": True,
+                "shap_values": [val.tolist() for val in processed_shap_values],
+                "expected_values": expected_values if isinstance(expected_values, list) else [expected_values],
+                "explanations": explanations,
+                "feature_names": self.feature_names[:ecg_instance.shape[1]],
+                "explainer_type": self.explainer_type
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao gerar explicação: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "shap_values": None,
+                "explanations": None
+            }
+
+    def _generate_explanations(self, shap_values: List[np.ndarray], expected_values: List[float],
+                             ecg_instance: np.ndarray, class_names: List[str], 
+                             max_display: int) -> Dict[str, Any]:
+        """
+        Gera diferentes tipos de visualizações SHAP.
+        """
+        explanations = {
+            "force_plots": {},
+            "waterfall_plots": {},
+            "summary_data": {},
+            "feature_importance": {}
+        }
+        
+        try:
+            # Limitar número de classes para performance
+            num_classes = min(len(class_names), len(shap_values))
+            
+            for i in range(num_classes):
+                class_name = class_names[i] if i < len(class_names) else f"Class_{i}"
+                
+                try:
+                    # 1. Force Plot
+                    force_plot = self._create_force_plot(
+                        expected_values[i] if i < len(expected_values) else expected_values[0],
+                        shap_values[i],
+                        ecg_instance,
+                        class_name,
+                        max_display
+                    )
+                    explanations["force_plots"][class_name] = force_plot
+                    
+                    # 2. Waterfall Plot
+                    waterfall_plot = self._create_waterfall_plot(
+                        expected_values[i] if i < len(expected_values) else expected_values[0],
+                        shap_values[i],
+                        ecg_instance,
+                        class_name,
+                        max_display
+                    )
+                    explanations["waterfall_plots"][class_name] = waterfall_plot
+                    
+                    # 3. Feature Importance
+                    feature_importance = self._calculate_feature_importance(
+                        shap_values[i],
+                        max_display
+                    )
+                    explanations["feature_importance"][class_name] = feature_importance
+                    
+                except Exception as class_error:
+                    logger.warning(f"Erro ao gerar explicação para classe {class_name}: {class_error}")
+                    explanations["force_plots"][class_name] = None
+                    explanations["waterfall_plots"][class_name] = None
+                    explanations["feature_importance"][class_name] = None
+            
+            return explanations
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao gerar visualizações: {e}")
+            return explanations
+
+    def _create_force_plot(self, expected_value: float, shap_values: np.ndarray, 
+                          instance: np.ndarray, class_name: str, max_display: int) -> Optional[str]:
+        """
+        Cria um force plot SHAP e retorna como base64.
+        """
+        try:
+            # Configurar matplotlib para não usar GUI
+            plt.switch_backend('Agg')
+            
+            # Criar figura
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            # Obter valores para o plot
+            shap_vals = shap_values[0] if shap_values.ndim > 1 else shap_values
+            instance_vals = instance[0] if instance.ndim > 1 else instance
+            
+            # Limitar número de features
+            if len(shap_vals) > max_display:
+                # Pegar as features mais importantes
+                importance_indices = np.argsort(np.abs(shap_vals))[-max_display:]
+                shap_vals = shap_vals[importance_indices]
+                instance_vals = instance_vals[importance_indices]
+                feature_names = [self.feature_names[i] if i < len(self.feature_names) 
+                               else f"Feature_{i}" for i in importance_indices]
+            else:
+                feature_names = self.feature_names[:len(shap_vals)]
+            
+            # Criar force plot manual (versão simplificada)
+            y_pos = np.arange(len(shap_vals))
+            colors = ['red' if val < 0 else 'blue' for val in shap_vals]
+            
+            bars = ax.barh(y_pos, shap_vals, color=colors, alpha=0.7)
+            ax.set_yticks(y_pos)
+            ax.set_yticklabels(feature_names)
+            ax.set_xlabel('SHAP Value (impact on model output)')
+            ax.set_title(f'SHAP Force Plot - {class_name}\nBase Value: {expected_value:.3f}')
+            ax.axvline(x=0, color='black', linestyle='-', alpha=0.3)
+            
+            # Adicionar valores nas barras
+            for i, (bar, val) in enumerate(zip(bars, shap_vals)):
+                ax.text(val + (0.01 if val >= 0 else -0.01), bar.get_y() + bar.get_height()/2, 
+                       f'{val:.3f}', ha='left' if val >= 0 else 'right', va='center', fontsize=8)
+            
+            plt.tight_layout()
+            
+            # Converter para base64
+            buf = BytesIO()
+            fig.savefig(buf, format="png", bbox_inches='tight', dpi=100)
+            plt.close(fig)
+            
+            data = base64.b64encode(buf.getbuffer()).decode("ascii")
+            return f"data:image/png;base64,{data}"
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao criar force plot: {e}")
+            return None
+
+    def _create_waterfall_plot(self, expected_value: float, shap_values: np.ndarray, 
+                              instance: np.ndarray, class_name: str, max_display: int) -> Optional[str]:
+        """
+        Cria um waterfall plot SHAP e retorna como base64.
+        """
+        try:
+            plt.switch_backend('Agg')
+            
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            # Obter valores
+            shap_vals = shap_values[0] if shap_values.ndim > 1 else shap_values
+            instance_vals = instance[0] if instance.ndim > 1 else instance
+            
+            # Limitar e ordenar por importância
+            if len(shap_vals) > max_display:
+                importance_indices = np.argsort(np.abs(shap_vals))[-max_display:]
+                shap_vals = shap_vals[importance_indices]
+                instance_vals = instance_vals[importance_indices]
+                feature_names = [self.feature_names[i] if i < len(self.feature_names) 
+                               else f"Feature_{i}" for i in importance_indices]
+            else:
+                feature_names = self.feature_names[:len(shap_vals)]
+            
+            # Ordenar por valor SHAP
+            sorted_indices = np.argsort(shap_vals)
+            shap_vals = shap_vals[sorted_indices]
+            feature_names = [feature_names[i] for i in sorted_indices]
+            
+            # Criar waterfall plot
+            cumulative = expected_value
+            x_pos = 0
+            
+            # Base value
+            ax.bar(x_pos, expected_value, color='gray', alpha=0.7, label='Base Value')
+            ax.text(x_pos, expected_value/2, f'Base\n{expected_value:.3f}', 
+                   ha='center', va='center', fontsize=8)
+            x_pos += 1
+            
+            # Features
+            for i, (name, val) in enumerate(zip(feature_names, shap_vals)):
+                color = 'red' if val < 0 else 'blue'
+                ax.bar(x_pos, val, bottom=cumulative, color=color, alpha=0.7)
+                ax.text(x_pos, cumulative + val/2, f'{name}\n{val:.3f}', 
+                       ha='center', va='center', fontsize=7, rotation=45)
+                cumulative += val
+                x_pos += 1
+            
+            # Final prediction
+            ax.bar(x_pos, 0, bottom=cumulative, color='green', alpha=0.7, label='Prediction')
+            ax.text(x_pos, cumulative, f'Final\n{cumulative:.3f}', 
+                   ha='center', va='bottom', fontsize=8)
+            
+            ax.set_title(f'SHAP Waterfall Plot - {class_name}')
+            ax.set_ylabel('Model Output')
+            ax.set_xticks([])
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            
+            # Converter para base64
+            buf = BytesIO()
+            fig.savefig(buf, format="png", bbox_inches='tight', dpi=100)
+            plt.close(fig)
+            
+            data = base64.b64encode(buf.getbuffer()).decode("ascii")
+            return f"data:image/png;base64,{data}"
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao criar waterfall plot: {e}")
+            return None
+
+    def _calculate_feature_importance(self, shap_values: np.ndarray, max_display: int) -> Dict[str, float]:
+        """
+        Calcula importância das features baseada nos valores SHAP.
+        """
+        try:
+            shap_vals = shap_values[0] if shap_values.ndim > 1 else shap_values
+            
+            # Calcular importância absoluta
+            importance = np.abs(shap_vals)
+            
+            # Criar dicionário com nomes das features
+            feature_importance = {}
+            for i, imp in enumerate(importance):
+                feature_name = self.feature_names[i] if i < len(self.feature_names) else f"Feature_{i}"
+                feature_importance[feature_name] = float(imp)
+            
+            # Ordenar por importância e limitar
+            sorted_importance = dict(sorted(feature_importance.items(), 
+                                          key=lambda x: x[1], reverse=True)[:max_display])
+            
+            return sorted_importance
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao calcular importância das features: {e}")
+            return {}
+
+    def get_global_explanation(self, X_sample: np.ndarray, class_names: List[str], 
+                              max_display: int = 10) -> Dict[str, Any]:
+        """
+        Gera explicação global baseada em uma amostra de dados.
+        
+        Args:
+            X_sample: Amostra de dados para análise global
+            class_names: Nomes das classes
+            max_display: Número máximo de features a exibir
+            
+        Returns:
+            Dicionário com explicação global
+        """
+        try:
+            logger.info("Gerando explicação global...")
+            
+            # Limitar tamanho da amostra para performance
+            if len(X_sample) > 100:
+                indices = np.random.choice(len(X_sample), 100, replace=False)
+                X_sample = X_sample[indices]
+            
+            # Gerar valores SHAP para a amostra
+            if self.explainer_type == "tree":
+                shap_values = self.explainer.shap_values(X_sample)
+            else:
+                shap_values = self.explainer.shap_values(X_sample)
+            
+            # Processar valores SHAP
+            if not isinstance(shap_values, list):
+                shap_values = [shap_values]
+            
+            global_explanation = {
+                "feature_importance_global": {},
+                "summary_plots": {}
+            }
+            
+            for i, class_name in enumerate(class_names[:len(shap_values)]):
+                # Importância global das features
+                mean_abs_shap = np.mean(np.abs(shap_values[i]), axis=0)
+                
+                feature_importance = {}
+                for j, imp in enumerate(mean_abs_shap):
+                    feature_name = self.feature_names[j] if j < len(self.feature_names) else f"Feature_{j}"
+                    feature_importance[feature_name] = float(imp)
+                
+                # Ordenar e limitar
+                sorted_importance = dict(sorted(feature_importance.items(), 
+                                              key=lambda x: x[1], reverse=True)[:max_display])
+                global_explanation["feature_importance_global"][class_name] = sorted_importance
+            
+            logger.info("✅ Explicação global gerada com sucesso")
+            return {
+                "success": True,
+                "global_explanation": global_explanation
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao gerar explicação global: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
