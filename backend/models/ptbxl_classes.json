@@ -1,0 +1,16 @@
+[
+  "Normal ECG",
+  "Atrial Fibrillation",
+  "1st Degree AV Block",
+  "Left Bundle Branch Block",
+  "Right Bundle Branch Block",
+  "Premature Atrial Contraction",
+  "Premature Ventricular Contraction",
+  "ST-T Change",
+  "Sinus Bradycardia",
+  "Sinus Tachycardia",
+  "Left Atrial Enlargement",
+  "Left Ventricular Hypertrophy",
+  "Right Ventricular Hypertrophy",
+  "Myocardial Infarction"
+]
