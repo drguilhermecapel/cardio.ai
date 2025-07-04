@@ -37,7 +37,7 @@ import MedicalCard from './components/ui/MedicalCard'
 import ECGVisualization from './components/ui/ECGVisualization'
 import AIInsightPanel from './components/ui/AIInsightPanel'
 
-const SPEIApp = (): JSX.Element => {
+const CardioApp = (): JSX.Element => {
   const [activeModule, setActiveModule] = useState('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [theme, setTheme] = useState('dark')
@@ -760,7 +760,7 @@ function App(): JSX.Element {
     return <LoginPage />
   }
 
-  return <SPEIApp />
+  return <CardioApp />
 }
 
 function AppWithAuth(): JSX.Element {

@@ -7,7 +7,7 @@ O CardioAI Pro é um sistema completo de análise de eletrocardiograma (ECG) bas
 ## 🏗️ Arquitetura do Sistema
 
 ### 1. Camada de Aquisição e Pré-processamento
-- **Suporte a múltiplos formatos**: SCP-ECG, DICOM, HL7 aECG, CSV, TXT, NPY
+- **Suporte a múltiplos formatos**: SCP-ECG, DICOM, HL7 aECG, CSV, TXT, NPY, EDF, WFDB
 - **Pipeline de pré-processamento**: Filtragem digital, remoção de artefatos, normalização
 - **Taxa de amostragem**: 250-1000 Hz (idealmente 500 Hz)
 - **Segmentação temporal**: Detecção automática de complexos QRS
@@ -76,7 +76,20 @@ O CardioAI Pro é um sistema completo de análise de eletrocardiograma (ECG) bas
 - Node.js 18 ou superior
 - Git
 
-### Backend
+### Instalação Rápida
+```bash
+# Clonar repositório
+git clone https://github.com/drguilhermecapel/cardio.ai.git
+cd cardio.ai
+
+# Configurar ambiente e iniciar servidor
+python run.py setup
+python run.py run
+```
+
+### Instalação Detalhada
+
+#### Backend
 ```bash
 # Clonar repositório
 git clone https://github.com/drguilhermecapel/cardio.ai.git
@@ -92,11 +105,13 @@ cardioai_env\Scripts\activate  # Windows
 pip install -r requirements.txt
 
 # Iniciar servidor
+python run.py run
+# ou
 cd backend
 python -m app.main
 ```
 
-### Frontend
+#### Frontend
 ```bash
 # Instalar dependências
 cd frontend
@@ -111,48 +126,59 @@ npm run build
 
 ## 🚀 Uso Rápido
 
-### 1. Análise de ECG via API
+### 1. Upload e Análise de ECG
 
 ```python
 import requests
 import numpy as np
 
-# Dados de ECG (exemplo)
-ecg_data = np.random.randn(1000).tolist()
+# Passo 1: Upload de arquivo ECG
+with open('ecg_sample.csv', 'rb') as f:
+    response = requests.post(
+        'http://localhost:8000/api/v1/ecg/upload',
+        files={'file': ('ecg_sample.csv', f, 'text/csv')}
+    )
 
-# Requisição para análise
-response = requests.post("http://localhost:8000/api/v1/ecg/analyze", json={
-    "patient_id": "PATIENT_001",
-    "ecg_data": ecg_data,
-    "sampling_rate": 500,
-    "leads": ["I"]
-})
+process_data = response.json()
+process_id = process_data['process_id']
+
+# Passo 2: Análise do ECG
+response = requests.post(
+    f'http://localhost:8000/api/v1/ecg/analyze/{process_id}'
+)
 
 result = response.json()
-print(f"Confiança: {result['confidence']:.3f}")
-print(f"Predições: {result['predictions']}")
+print(f"Diagnóstico: {result['prediction']['diagnosis']}")
+print(f"Confiança: {result['prediction']['confidence']:.3f}")
+print(f"Recomendações: {result['prediction']['recommendations']}")
 ```
 
-### 2. Upload de Arquivo ECG
+### 2. Upload de Arquivo ECG via cURL
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/ecg/upload-file" \
-     -F "patient_id=PATIENT_002" \
-     -F "file=@ecg_data.csv" \
-     -F "sampling_rate=500"
+# Upload de arquivo
+curl -X POST "http://localhost:8000/api/v1/ecg/upload" \
+     -F "file=@ecg_data.csv"
+
+# Análise (substituir PROCESS_ID pelo ID retornado no upload)
+curl -X POST "http://localhost:8000/api/v1/ecg/analyze/PROCESS_ID"
 ```
 
-### 3. Explicabilidade
+### 3. Listar Modelos Disponíveis
 
 ```python
-# Gerar explicação para análise
-response = requests.post("http://localhost:8000/api/v1/ecg/explain/analysis_id", json={
-    "ecg_data": ecg_data,
-    "model_name": "demo_ecg_classifier"
-})
+import requests
 
-explanation = response.json()
-# Visualizações em base64 disponíveis em explanation['explanation']['analyses']
+# Listar todos os modelos disponíveis
+response = requests.get('http://localhost:8000/api/v1/models')
+models = response.json()['models']
+print(f"Modelos disponíveis: {models}")
+
+# Obter informações detalhadas sobre um modelo específico
+model_name = models[0]
+response = requests.get(f'http://localhost:8000/api/v1/models/{model_name}')
+model_info = response.json()
+print(f"Informações do modelo: {model_info}")
 ```
 
 ## 📊 Recursos FHIR R4
@@ -186,16 +212,20 @@ O sistema é totalmente compatível com FHIR R4:
 
 ### Executar Testes Completos
 ```bash
-python test_system.py
+python run.py test
 ```
 
-### Executar Testes Lite (sem dependências pesadas)
+### Executar Testes Unitários Específicos
 ```bash
-python test_system_lite.py
+cd backend
+python -m unittest tests/test_unified_model_service.py
+python -m unittest tests/test_unified_ecg_service.py
+python -m unittest tests/test_main_api.py
 ```
 
-### Testes Unitários
+### Testes com pytest
 ```bash
+cd backend
 pytest tests/
 ```
 
@@ -245,6 +275,16 @@ Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICE
 - **Documentação**: [Wiki do Projeto](https://github.com/drguilhermecapel/cardio.ai/wiki)
 
 ## 🔄 Changelog
+
+### v2.1.0 (2025-07-04)
+- ✨ Arquitetura de serviços unificada
+- ✨ Suporte expandido para formatos EDF e WFDB
+- ✨ Melhor tratamento de erros e robustez
+- ✨ Visualizações avançadas de ECG
+- 🔧 Refatoração para eliminar redundâncias
+- 🔧 Testes unitários abrangentes
+- 🔧 Script de inicialização simplificado
+- 📚 Documentação da API atualizada
 
 ### v2.0.0 (2025-01-03)
 - ✨ Arquitetura hierárquica multi-tarefa implementada

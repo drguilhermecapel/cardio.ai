@@ -33,8 +33,8 @@ async def lifespan(app: FastAPI):
     # Inicializar serviços
     try:
         # Importar serviços unificados
-        from backend.app.services.unified_model_service import get_model_service
-        from backend.app.services.unified_ecg_service import get_ecg_service
+        from app.services.unified_model_service import get_model_service
+        from app.services.unified_ecg_service import get_ecg_service
         
         # Inicializar serviços
         model_service = get_model_service()
@@ -107,11 +107,11 @@ if os.path.exists("static"):
 
 # Dependências
 def get_model_service():
-    from backend.app.services.unified_model_service import get_model_service
+    from app.services.unified_model_service import get_model_service
     return get_model_service()
 
 def get_ecg_service():
-    from backend.app.services.unified_ecg_service import get_ecg_service
+    from app.services.unified_ecg_service import get_ecg_service
     return get_ecg_service()
 
 

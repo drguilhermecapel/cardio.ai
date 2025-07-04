@@ -15,6 +15,14 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 import uuid
+import sys
+
+# Adicionar diretório pai ao path para importar módulos
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+# Importar serviços unificados
+from backend.app.services.unified_model_service import get_model_service
+from backend.app.services.unified_ecg_service import get_ecg_service
 
 # Configurar logging
 logging.basicConfig(
@@ -32,10 +40,6 @@ async def lifespan(app: FastAPI):
     
     # Inicializar serviços
     try:
-        # Importar serviços unificados
-        from backend.app.services.unified_model_service import get_model_service
-        from backend.app.services.unified_ecg_service import get_ecg_service
-        
         # Inicializar serviços
         model_service = get_model_service()
         ecg_service = get_ecg_service()
@@ -105,16 +109,6 @@ if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-# Dependências
-def get_model_service():
-    from backend.app.services.unified_model_service import get_model_service
-    return get_model_service()
-
-def get_ecg_service():
-    from backend.app.services.unified_ecg_service import get_ecg_service
-    return get_ecg_service()
-
-
 # Endpoints principais
 @app.get("/")
 async def root():
@@ -147,12 +141,11 @@ async def root():
 
 
 @app.get("/health")
-async def health_check(
-    model_service = Depends(get_model_service)
-):
+async def health_check():
     """Endpoint de health check."""
     try:
         # Verificar serviços
+        model_service = get_model_service()
         models_available = len(model_service.list_models())
         
         return {
@@ -183,11 +176,10 @@ async def health_check(
 
 
 @app.get("/info")
-async def system_info(
-    model_service = Depends(get_model_service)
-):
+async def system_info():
     """Informações detalhadas do sistema."""
     try:
+        model_service = get_model_service()
         models = model_service.list_models()
         model_details = {}
         
@@ -226,10 +218,24 @@ async def system_info(
 
 
 # API v1 Endpoints
+@app.get("/api/v1/health")
+async def api_health_check():
+    """Verifica o status de saúde da API v1."""
+    return {
+        "status": "healthy",
+        "api_version": "v1",
+        "endpoints": [
+            "/ecg/upload",
+            "/ecg/analyze/{process_id}",
+            "/models",
+            "/models/{model_name}"
+        ]
+    }
+
+
 @app.post("/api/v1/ecg/upload")
 async def upload_ecg(
-    file: UploadFile = File(...),
-    ecg_service = Depends(get_ecg_service)
+    file: UploadFile = File(...)
 ):
     """
     Faz upload e processa um arquivo de ECG.
@@ -247,7 +253,8 @@ async def upload_ecg(
             shutil.copyfileobj(file.file, buffer)
         
         # Processar arquivo
-        result = ecg_service.process_ecg_file(temp_path)
+        ecg_service = get_ecg_service()
+        result = ecg_service.process_ecg_file(str(temp_path))
         
         # Limpar arquivo temporário
         os.remove(temp_path)
@@ -262,8 +269,7 @@ async def upload_ecg(
 @app.post("/api/v1/ecg/analyze/{process_id}")
 async def analyze_ecg(
     process_id: str,
-    model_name: Optional[str] = None,
-    ecg_service = Depends(get_ecg_service)
+    model_name: Optional[str] = None
 ):
     """
     Analisa um ECG previamente processado usando modelo de IA.
@@ -273,6 +279,7 @@ async def analyze_ecg(
         model_name: Nome do modelo a usar (opcional)
     """
     try:
+        ecg_service = get_ecg_service()
         result = ecg_service.analyze_ecg(process_id, model_name)
         
         if "error" in result:
@@ -288,11 +295,10 @@ async def analyze_ecg(
 
 
 @app.get("/api/v1/models")
-async def list_models(
-    model_service = Depends(get_model_service)
-):
+async def list_models():
     """Lista todos os modelos disponíveis."""
     try:
+        model_service = get_model_service()
         models = model_service.list_models()
         
         return {
@@ -308,11 +314,11 @@ async def list_models(
 
 @app.get("/api/v1/models/{model_name}")
 async def get_model_info(
-    model_name: str,
-    model_service = Depends(get_model_service)
+    model_name: str
 ):
     """Obtém informações detalhadas sobre um modelo específico."""
     try:
+        model_service = get_model_service()
         info = model_service.get_model_info(model_name)
         
         if "error" in info:
@@ -361,61 +367,8 @@ async def global_exception_handler(request, exc):
     )
 
 
-class CardioAIApp:
-    """Classe principal da aplicação CardioAI."""
-    
-    def __init__(self):
-        self.name = "CardioAI Pro"
-        self.version = "2.0.0"
-        self.description = "Sistema Avançado de Análise de ECG com IA"
-        self.status = "initialized"
-        self.modules = [
-            "unified_model_service",
-            "unified_ecg_service",
-            "api_service",
-            "fhir_integration"
-        ]
-        
-    def get_info(self) -> Dict[str, Any]:
-        """Retorna informações da aplicação."""
-        return {
-            "name": self.name,
-            "version": self.version,
-            "description": self.description,
-            "status": self.status,
-            "modules": self.modules,
-            "architecture": {
-                "layers": [
-                    "Aquisição e Pré-processamento",
-                    "Modelos de IA Hierárquicos",
-                    "Extração de Características",
-                    "Validação e Confiabilidade",
-                    "Integração e APIs",
-                    "Interface de Usuário"
-                ],
-                "compliance": ["FHIR R4", "HIPAA", "LGPD", "ISO 13485"]
-            }
-        }
-    
-    def start(self):
-        """Inicia a aplicação."""
-        self.status = "running"
-        logger.info(f"{self.name} v{self.version} iniciado com sucesso")
-        
-    def stop(self):
-        """Para a aplicação."""
-        self.status = "stopped"
-        logger.info(f"{self.name} parado")
-
-
-# Instância global da aplicação
-cardio_app = CardioAIApp()
-
-
 if __name__ == "__main__":
     import uvicorn
-    
-    cardio_app.start()
     
     # Configurações de produção
     uvicorn.run(

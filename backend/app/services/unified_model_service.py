@@ -1,49 +1,61 @@
 """
-Serviço de Modelos Aprimorado
-Integração com modelos pré-treinados .h5 e análise avançada de ECG
+Serviço Unificado de Modelos para CardioAI
+Combina as melhores funcionalidades de todos os serviços de modelo anteriores
 """
 
-import numpy as np
-import logging
-from typing import Dict, List, Any, Optional, Tuple
-import json
 import os
-from pathlib import Path
-from datetime import datetime
+import logging
 import pickle
 import joblib
+import json
+import hashlib
+import numpy as np
+from typing import Dict, List, Optional, Tuple, Any, Union
+from pathlib import Path
+from datetime import datetime
 
-# Tentar importar TensorFlow/Keras para modelos .h5
+# Importações condicionais para TensorFlow e PyTorch
 try:
     import tensorflow as tf
     from tensorflow import keras
     TENSORFLOW_AVAILABLE = True
-    logger = logging.getLogger(__name__)
-    logger.info("TensorFlow disponível para modelos .h5")
 except ImportError:
     TENSORFLOW_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("TensorFlow não disponível - usando modelos simplificados")
 
-# Imports para modelos alternativos
+try:
+    import torch
+    import torch.nn as nn
+    PYTORCH_AVAILABLE = True
+except ImportError:
+    PYTORCH_AVAILABLE = False
+
+# Importações para modelos alternativos
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
-class EnhancedModelService:
-    """Serviço aprimorado para modelos de ECG com suporte a .h5"""
+class UnifiedModelService:
+    """
+    Serviço unificado para gerenciamento de modelos de ML para análise de ECG.
+    Suporta modelos TensorFlow/Keras, PyTorch e scikit-learn.
+    """
     
-    def __init__(self):
-        self.models = {}
-        self.scalers = {}
-        self.model_metadata = {}
-        self.models_dir = Path("models")
+    def __init__(self, models_dir: str = "models"):
+        """
+        Inicializa o serviço de modelos.
+        
+        Args:
+            models_dir: Diretório onde os modelos estão armazenados
+        """
+        self.models_dir = Path(models_dir)
         self.models_dir.mkdir(exist_ok=True)
+        
+        # Armazenamento de modelos e metadados
+        self.models: Dict[str, Any] = {}
+        self.scalers: Dict[str, Any] = {}
+        self.model_metadata: Dict[str, Dict] = {}
         
         # Configurações de diagnóstico
         self.diagnosis_mapping = {
@@ -67,10 +79,18 @@ class EnhancedModelService:
         self._initialize_models()
     
     def _initialize_models(self):
-        """Inicializa modelos disponíveis."""
+        """Inicializa modelos disponíveis de todas as fontes suportadas."""
         try:
-            # Tentar carregar modelos .h5 existentes
-            self._load_h5_models()
+            # Carregar modelos .h5 (TensorFlow/Keras)
+            if TENSORFLOW_AVAILABLE:
+                self._load_h5_models()
+            
+            # Carregar modelos .pt (PyTorch)
+            if PYTORCH_AVAILABLE:
+                self._load_pytorch_models()
+            
+            # Carregar modelos scikit-learn
+            self._load_sklearn_models()
             
             # Criar modelo demo se nenhum modelo foi carregado
             if not self.models:
@@ -132,8 +152,105 @@ class EnhancedModelService:
         except Exception as e:
             logger.error(f"Erro na busca por modelos .h5: {str(e)}")
     
+    def _load_pytorch_models(self):
+        """Carrega modelos PyTorch do diretório de modelos."""
+        if not PYTORCH_AVAILABLE:
+            logger.warning("PyTorch não disponível - pulando modelos .pt")
+            return
+        
+        try:
+            pt_files = list(self.models_dir.glob("*.pt"))
+            
+            for pt_file in pt_files:
+                try:
+                    model_name = pt_file.stem
+                    
+                    # Carregar modelo
+                    model = torch.load(str(pt_file))
+                    model.eval()  # Colocar em modo de avaliação
+                    
+                    # Carregar scaler se existir
+                    scaler_file = self.models_dir / f"{model_name}_scaler.pkl"
+                    scaler = None
+                    if scaler_file.exists():
+                        scaler = joblib.load(scaler_file)
+                    
+                    # Carregar metadados se existir
+                    metadata_file = self.models_dir / f"{model_name}_metadata.json"
+                    metadata = {}
+                    if metadata_file.exists():
+                        with open(metadata_file, 'r') as f:
+                            metadata = json.load(f)
+                    
+                    # Registrar modelo
+                    self.models[model_name] = model
+                    if scaler:
+                        self.scalers[model_name] = scaler
+                    self.model_metadata[model_name] = {
+                        'type': 'pytorch',
+                        'loaded_from': str(pt_file),
+                        'has_scaler': scaler is not None,
+                        **metadata
+                    }
+                    
+                    logger.info(f"Modelo PyTorch carregado: {model_name}")
+                    
+                except Exception as e:
+                    logger.error(f"Erro ao carregar {pt_file}: {str(e)}")
+            
+        except Exception as e:
+            logger.error(f"Erro na busca por modelos PyTorch: {str(e)}")
+    
+    def _load_sklearn_models(self):
+        """Carrega modelos scikit-learn do diretório de modelos."""
+        try:
+            pkl_files = list(self.models_dir.glob("*.pkl"))
+            
+            for pkl_file in pkl_files:
+                # Pular arquivos de scaler
+                if "_scaler" in pkl_file.name:
+                    continue
+                
+                try:
+                    model_name = pkl_file.stem
+                    
+                    # Carregar modelo
+                    model = joblib.load(pkl_file)
+                    
+                    # Carregar scaler se existir
+                    scaler_file = self.models_dir / f"{model_name}_scaler.pkl"
+                    scaler = None
+                    if scaler_file.exists():
+                        scaler = joblib.load(scaler_file)
+                    
+                    # Carregar metadados se existir
+                    metadata_file = self.models_dir / f"{model_name}_metadata.json"
+                    metadata = {}
+                    if metadata_file.exists():
+                        with open(metadata_file, 'r') as f:
+                            metadata = json.load(f)
+                    
+                    # Registrar modelo
+                    self.models[model_name] = model
+                    if scaler:
+                        self.scalers[model_name] = scaler
+                    self.model_metadata[model_name] = {
+                        'type': 'sklearn',
+                        'loaded_from': str(pkl_file),
+                        'has_scaler': scaler is not None,
+                        **metadata
+                    }
+                    
+                    logger.info(f"Modelo scikit-learn carregado: {model_name}")
+                    
+                except Exception as e:
+                    logger.error(f"Erro ao carregar {pkl_file}: {str(e)}")
+            
+        except Exception as e:
+            logger.error(f"Erro na busca por modelos scikit-learn: {str(e)}")
+    
     def _create_demo_models(self):
-        """Cria modelos de demonstração."""
+        """Cria modelos de demonstração quando nenhum modelo real está disponível."""
         try:
             # Modelo demo baseado em Random Forest
             demo_model = RandomForestClassifier(
@@ -303,6 +420,8 @@ class EnhancedModelService:
             # Realizar predição
             if model_meta['type'] == 'tensorflow_h5':
                 prediction = self._predict_tensorflow(model, processed_data, model_name)
+            elif model_meta['type'] == 'pytorch':
+                prediction = self._predict_pytorch(model, processed_data, model_name)
             else:
                 prediction = self._predict_sklearn(model, processed_data, model_name)
             
@@ -368,6 +487,27 @@ class EnhancedModelService:
             # Retornar predição dummy
             return np.random.rand(len(self.diagnosis_mapping))
     
+    def _predict_pytorch(self, model, data: np.ndarray, model_name: str) -> np.ndarray:
+        """Realiza predição com modelo PyTorch."""
+        try:
+            # Preparar dados para PyTorch
+            input_data = torch.tensor(data, dtype=torch.float32).reshape(1, 1, -1)
+            
+            # Predição
+            with torch.no_grad():
+                prediction = model(input_data)
+                
+            # Converter para numpy
+            if isinstance(prediction, torch.Tensor):
+                prediction = prediction.numpy()
+            
+            return prediction[0]  # Remover dimensão do batch
+            
+        except Exception as e:
+            logger.error(f"Erro na predição PyTorch: {str(e)}")
+            # Retornar predição dummy
+            return np.random.rand(len(self.diagnosis_mapping))
+    
     def _predict_sklearn(self, model, data: np.ndarray, model_name: str) -> np.ndarray:
         """Realiza predição com modelo scikit-learn."""
         try:
@@ -409,12 +549,12 @@ class EnhancedModelService:
             
             # Análise de confiança
             confidence_level = self._analyze_confidence(confidence)
-            
+
             # Recomendações clínicas
             recommendations = self._generate_recommendations(
                 predicted_class, confidence, metadata
             )
-            
+
             result = {
                 'predicted_class': predicted_class,
                 'diagnosis': diagnosis,
@@ -425,9 +565,9 @@ class EnhancedModelService:
                 'model_metadata': model_meta,
                 'analysis_timestamp': datetime.now().isoformat()
             }
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Erro no pós-processamento: {str(e)}")
             return {
@@ -437,7 +577,7 @@ class EnhancedModelService:
                 'confidence_level': 'baixa',
                 'error': str(e)
             }
-    
+
     def _analyze_confidence(self, confidence: float) -> str:
         """Analisa nível de confiança da predição."""
         if confidence >= 0.9:
@@ -450,47 +590,45 @@ class EnhancedModelService:
             return 'baixa'
         else:
             return 'muito_baixa'
-    
-    def _generate_recommendations(self, predicted_class: int, confidence: float, 
+
+    def _generate_recommendations(self, predicted_class: int, confidence: float,
                                 metadata: Optional[Dict]) -> Dict[str, Any]:
         """Gera recomendações clínicas baseadas na predição."""
         try:
             recommendations = {
                 'clinical_review_required': confidence < 0.7,
-                'urgent_attention': False,
-                'follow_up_recommended': False,
-                'additional_tests': [],
-                'clinical_notes': []
+                'follow_up': [],
+                'clinical_notes': [],
+                'urgent_attention': False
             }
             
-            # Recomendações baseadas no diagnóstico
-            if predicted_class == 1:  # Fibrilação Atrial
+            # Recomendações baseadas na classe
+            if predicted_class == 0:  # Normal
+                recommendations['follow_up'].append('Acompanhamento de rotina')
+                recommendations['clinical_notes'].append('ECG dentro dos padrões normais')
+                
+            elif predicted_class == 1:  # Fibrilação Atrial
+                recommendations['follow_up'].append('Avaliação cardiológica em 7 dias')
+                recommendations['clinical_notes'].append('Considerar anticoagulação')
                 recommendations['urgent_attention'] = confidence > 0.8
-                recommendations['additional_tests'] = ['Holter 24h', 'Ecocardiograma']
-                recommendations['clinical_notes'].append('Avaliar anticoagulação')
                 
-            elif predicted_class == 2:  # Bradicardia
-                recommendations['follow_up_recommended'] = True
-                recommendations['additional_tests'] = ['Teste de esforço']
-                recommendations['clinical_notes'].append('Verificar medicações')
+            elif predicted_class in [2, 3]:  # Bradicardia ou Taquicardia
+                recommendations['follow_up'].append('Monitoramento de ritmo cardíaco')
+                recommendations['clinical_notes'].append('Avaliar medicações em uso')
                 
-            elif predicted_class == 3:  # Taquicardia
+            elif predicted_class == 4:  # Arritmia Ventricular
+                recommendations['follow_up'].append('Avaliação cardiológica imediata')
+                recommendations['clinical_notes'].append('Considerar Holter 24h')
                 recommendations['urgent_attention'] = confidence > 0.7
-                recommendations['additional_tests'] = ['Eletrólitos', 'TSH']
                 
-            elif predicted_class in [4, 5]:  # Arritmias graves
+            elif predicted_class in [6, 7]:  # Isquemia ou Infarto
+                recommendations['follow_up'].append('Avaliação cardiológica de emergência')
+                recommendations['clinical_notes'].append('Considerar marcadores cardíacos')
                 recommendations['urgent_attention'] = True
-                recommendations['clinical_review_required'] = True
-                recommendations['additional_tests'] = ['Ecocardiograma', 'Holter']
-                
-            elif predicted_class in [6, 7]:  # Isquemia/Infarto
-                recommendations['urgent_attention'] = True
-                recommendations['clinical_notes'].append('Protocolo de síndrome coronariana aguda')
-                recommendations['additional_tests'] = ['Troponina', 'Ecocardiograma']
             
             # Ajustar baseado na confiança
             if confidence < 0.5:
-                recommendations['clinical_review_required'] = True
+                recommendations['follow_up'].append('Repetir ECG')
                 recommendations['clinical_notes'].append('Baixa confiança - repetir ECG')
             
             return recommendations
@@ -499,51 +637,37 @@ class EnhancedModelService:
             logger.error(f"Erro na geração de recomendações: {str(e)}")
             return {
                 'clinical_review_required': True,
-                'urgent_attention': False,
-                'follow_up_recommended': True,
-                'additional_tests': [],
-                'clinical_notes': ['Erro na análise - revisão manual necessária']
+                'follow_up': ['Avaliação médica'],
+                'clinical_notes': ['Erro na análise automática'],
+                'urgent_attention': False
             }
     
     def list_models(self) -> List[str]:
-        """Lista modelos disponíveis."""
+        """Lista todos os modelos disponíveis."""
         return list(self.models.keys())
     
     def get_model_info(self, model_name: str) -> Dict[str, Any]:
-        """Obtém informações detalhadas do modelo."""
-        if model_name not in self.models:
-            return {'error': f'Modelo {model_name} não encontrado'}
+        """Retorna informações sobre um modelo específico."""
+        if model_name not in self.model_metadata:
+            return {'error': f"Modelo '{model_name}' não encontrado"}
         
-        return self.model_metadata.get(model_name, {})
+        return self.model_metadata[model_name]
     
-    def add_h5_model(self, model_path: str, model_name: Optional[str] = None) -> bool:
-        """
-        Adiciona modelo .h5 ao serviço.
+    def add_h5_model(self, model_path: str, model_name: str) -> bool:
+        """Adiciona um novo modelo .h5 ao serviço."""
+        if not TENSORFLOW_AVAILABLE:
+            logger.error("TensorFlow não disponível - não é possível adicionar modelo .h5")
+            return False
         
-        Args:
-            model_path: Caminho para o arquivo .h5
-            model_name: Nome opcional para o modelo
-            
-        Returns:
-            True se carregado com sucesso
-        """
         try:
-            if not TENSORFLOW_AVAILABLE:
-                logger.error("TensorFlow não disponível para carregar modelo .h5")
-                return False
-            
             model_path = Path(model_path)
             if not model_path.exists():
                 logger.error(f"Arquivo não encontrado: {model_path}")
                 return False
             
-            # Nome do modelo
-            if not model_name:
-                model_name = model_path.stem
-            
             # Carregar modelo
             model = keras.models.load_model(str(model_path))
-            
+
             # Registrar modelo
             self.models[model_name] = model
             self.model_metadata[model_name] = {
@@ -553,20 +677,19 @@ class EnhancedModelService:
                 'loaded_from': str(model_path),
                 'loaded_at': datetime.now().isoformat()
             }
-            
+
             logger.info(f"Modelo .h5 adicionado: {model_name}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Erro ao adicionar modelo .h5: {str(e)}")
             return False
 
 
-# Instância global do serviço aprimorado
-enhanced_model_service = EnhancedModelService()
+# Instância global do serviço unificado
+unified_model_service = UnifiedModelService()
 
 
-def get_enhanced_model_service() -> EnhancedModelService:
-    """Retorna instância do serviço aprimorado."""
-    return enhanced_model_service
-
+def get_model_service() -> UnifiedModelService:
+    """Retorna instância do serviço unificado de modelos."""
+    return unified_model_service
