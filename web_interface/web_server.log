@@ -1,0 +1,30 @@
+127.0.0.1 - - [04/Jul/2025 13:27:53] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:27:53] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:27:55] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:27:55] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:27:55] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:27:55] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:27:59] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:27:59] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:28:03] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [04/Jul/2025 13:28:03] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:28:03] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:28:05] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:28:05] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:28:05] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:28:05] "POST / HTTP/1.1" 501 -
+10.25.240.1 - - [04/Jul/2025 13:28:14] "GET / HTTP/1.1" 200 -
+10.25.240.1 - - [04/Jul/2025 13:28:14] "GET /app.js HTTP/1.1" 200 -
+10.25.240.1 - - [04/Jul/2025 13:28:14] "GET /styles.css HTTP/1.1" 200 -
+10.25.240.1 - - [04/Jul/2025 13:28:15] code 404, message File not found
+10.25.240.1 - - [04/Jul/2025 13:28:15] "GET /favicon.ico HTTP/1.1" 404 -
+127.0.0.1 - - [04/Jul/2025 13:28:15] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:28:15] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:28:17] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:28:17] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:28:19] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:28:19] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:28:25] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:28:25] "POST / HTTP/1.1" 501 -
+127.0.0.1 - - [04/Jul/2025 13:28:27] code 501, message Unsupported method ('POST')
+127.0.0.1 - - [04/Jul/2025 13:28:27] "POST / HTTP/1.1" 501 -
