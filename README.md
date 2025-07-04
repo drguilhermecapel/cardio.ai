@@ -1,8 +1,14 @@
-# CardioAI Pro - Sistema Avançado de Análise de ECG
+# CardioAI - Sistema de Análise de ECG com IA
 
 ## 🚀 Visão Geral
 
-O CardioAI Pro é um sistema completo de análise de eletrocardiograma (ECG) baseado em inteligência artificial, implementando uma arquitetura hierárquica multi-tarefa de última geração para interpretação automática de ECGs.
+O CardioAI é um sistema de análise de eletrocardiograma (ECG) baseado em inteligência artificial, implementando modelos de machine learning para interpretação automática de ECGs.
+
+## 🌐 URL Pública para Teste
+
+A aplicação está disponível para teste no seguinte endereço:
+
+**[https://work-1-gwtqionemsvrevpi.prod-runtime.all-hands.dev/](https://work-1-gwtqionemsvrevpi.prod-runtime.all-hands.dev/)**
 
 ## 🏗️ Arquitetura do Sistema
 
@@ -276,26 +282,14 @@ Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICE
 
 ## 🔄 Changelog
 
-### v2.1.0 (2025-07-04)
-- ✨ Arquitetura de serviços unificada
-- ✨ Suporte expandido para formatos EDF e WFDB
-- ✨ Melhor tratamento de erros e robustez
-- ✨ Visualizações avançadas de ECG
-- 🔧 Refatoração para eliminar redundâncias
-- 🔧 Testes unitários abrangentes
-- 🔧 Script de inicialização simplificado
-- 📚 Documentação da API atualizada
-
-### v2.0.0 (2025-01-03)
-- ✨ Arquitetura hierárquica multi-tarefa implementada
-- ✨ Sistema de explicabilidade com Grad-CAM e SHAP
-- ✨ Compatibilidade FHIR R4 completa
-- ✨ Sistema de incerteza bayesiana
-- ✨ APIs RESTful modernas
-- ✨ Interface web responsiva
-- 🔧 Pipeline de pré-processamento avançado
-- 🔧 Sistema de auditoria e logging
-- 🔧 Testes automatizados
+### v1.1.0 (2025-07-04)
+- ✨ Correção do formato do modelo e mapeamento de classes
+- ✨ Implementação de servidor robusto com tratamento de erros
+- ✨ Interface web melhorada com visualização de resultados
+- 🔧 Pré-processamento específico para ECG
+- 🔧 Modelo de backup sklearn para maior robustez
+- 🔧 Correção de bugs na análise de ECG
+- 📚 Documentação atualizada
 
 ### v1.0.0 (2024-06-30)
 - 🎉 Versão inicial do sistema
@@ -305,5 +299,5 @@ Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICE
 
 ---
 
-**CardioAI Pro** - Revolucionando a análise de ECG com inteligência artificial de última geração.
+**CardioAI** - Análise de ECG com inteligência artificial.
 
