@@ -348,27 +348,27 @@
                         </h5>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
-                                <p class="text-lg font-semibold text-green-700">${result.primary_diagnosis.diagnosis}</p>
-                                <p class="text-sm text-green-600">Confiança: ${(result.primary_diagnosis.confidence * 100).toFixed(1)}%</p>
+                                <p class="text-lg font-semibold text-green-700">${result.analysis.interpretation.primary_finding}</p>
+                                <p class="text-sm text-green-600">Confiança: ${result.analysis.interpretation.confidence}</p>
                             </div>
                             <div>
-                                <p class="text-sm"><strong>Nível:</strong> ${result.primary_diagnosis.confidence_level}</p>
-                                <p class="text-sm"><strong>Classe:</strong> ${result.primary_diagnosis.predicted_class}</p>
+                                <p class="text-sm"><strong>Frequência Cardíaca:</strong> ${result.analysis.measurements.heart_rate} bpm</p>
+                                <p class="text-sm"><strong>Modelo:</strong> ${result.analysis.model}</p>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Quality Alerts -->
-                    ${result.quality_alerts && result.quality_alerts.length > 0 ? `
+                    <!-- Predictions -->
                     <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                         <h5 class="font-semibold text-yellow-800 mb-2">
-                            <i class="fas fa-exclamation-triangle mr-2"></i>Alertas de Qualidade
+                            <i class="fas fa-chart-bar mr-2"></i>Predições
                         </h5>
                         <ul class="list-disc list-inside text-sm text-yellow-700">
-                            ${result.quality_alerts.map(alert => `<li>${alert}</li>`).join('')}
+                            ${result.analysis.predictions.map(pred => 
+                                `<li><strong>${pred.class}:</strong> ${(pred.probability * 100).toFixed(1)}%</li>`
+                            ).join('')}
                         </ul>
                     </div>
-                    ` : ''}
 
                     <!-- Clinical Recommendations -->
                     <div class="bg-purple-50 border border-purple-200 rounded-lg p-4">
@@ -377,12 +377,19 @@
                         </h5>
                         <div class="grid grid-cols-2 gap-4 text-sm">
                             <div>
-                                <p><strong>Revisão Clínica:</strong> ${result.clinical_recommendations.clinical_review_required ? 'Necessária' : 'Não necessária'}</p>
-                                <p><strong>Atenção Urgente:</strong> ${result.clinical_recommendations.urgent_attention ? 'Sim' : 'Não'}</p>
+                                <p><strong>Recomendações:</strong></p>
+                                <ul class="list-disc list-inside">
+                                    ${result.analysis.interpretation.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                                </ul>
                             </div>
                             <div>
-                                <p><strong>Follow-up:</strong> ${result.clinical_recommendations.follow_up_recommended ? 'Recomendado' : 'Não necessário'}</p>
-                                <p><strong>Testes Adicionais:</strong> ${result.clinical_recommendations.additional_tests ? result.clinical_recommendations.additional_tests.length : 0}</p>
+                                <p><strong>Achados Secundários:</strong></p>
+                                ${result.analysis.interpretation.secondary_findings.length > 0 
+                                    ? `<ul class="list-disc list-inside">
+                                        ${result.analysis.interpretation.secondary_findings.map(finding => `<li>${finding}</li>`).join('')}
+                                       </ul>`
+                                    : '<p>Nenhum achado secundário</p>'
+                                }
                             </div>
                         </div>
                     </div>
@@ -393,10 +400,10 @@
                             <i class="fas fa-cog mr-2"></i>Detalhes Técnicos
                         </summary>
                         <div class="mt-4 space-y-2 text-sm">
-                            <p><strong>Modelo Usado:</strong> ${result.model_info.model_name}</p>
-                            <p><strong>Taxa de Amostragem:</strong> ${result.digitization.sampling_rate_estimated} Hz</p>
-                            <p><strong>Calibração:</strong> ${result.digitization.calibration_applied ? 'Aplicada' : 'Não aplicada'}</p>
-                            <p><strong>FHIR:</strong> ${result.fhir_observation ? result.fhir_observation.created ? 'Criado' : 'Erro' : 'Não solicitado'}</p>
+                            <p><strong>Modelo Usado:</strong> ${result.analysis.model}</p>
+                            <p><strong>Taxa de Amostragem:</strong> ${result.digitization.sampling_rate} Hz</p>
+                            <p><strong>Formato de Dados:</strong> ${result.data.format}</p>
+                            <p><strong>FHIR:</strong> ${result.fhir ? 'Criado' : 'Não solicitado'}</p>
                         </div>
                     </details>
                 </div>
