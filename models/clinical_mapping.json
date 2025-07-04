@@ -1,0 +1,143 @@
+{
+  "class_mapping": {
+    "0": "Normal",
+    "1": "Infarto do Mioc\u00e1rdio",
+    "2": "ST/T Change",
+    "3": "Conduction Disturbance",
+    "4": "Hypertrophy",
+    "5": "Premature Atrial Contraction",
+    "6": "Arritmia Ventricular",
+    "7": "Fibrila\u00e7\u00e3o Atrial",
+    "8": "Atrial Flutter",
+    "9": "Supraventricular Tachyarrhythmia",
+    "10": "Wolff-Parkinson-White",
+    "11": "P Wave Change",
+    "12": "Hipertrofia Ventricular",
+    "13": "Left Atrial Overload/Enlargement",
+    "14": "Acute Myocardial Infarction",
+    "15": "Anterolateral Myocardial Infarction",
+    "16": "Aneurysm",
+    "17": "Anteroseptal Changes",
+    "18": "Anteroseptal Myocardial Infarction",
+    "19": "Complete Left Bundle Branch Block",
+    "20": "Complete Right Bundle Branch Block",
+    "21": "Digitalis Effect",
+    "22": "Electrolyte Imbalance",
+    "23": "Fascicular Block",
+    "24": "Incomplete Left Bundle Branch Block",
+    "25": "Inferior Myocardial Infarction",
+    "26": "Injury in Anteroseptal",
+    "27": "Injury in Anterolateral",
+    "28": "Injury in Inferolateral",
+    "29": "Injury in Inferior",
+    "30": "Injury in Lateral",
+    "31": "Incomplete Right Bundle Branch Block",
+    "32": "Isquemia",
+    "33": "Ischemia in Anterior",
+    "34": "Ischemia in Anteroseptal",
+    "35": "Ischemia in Inferolateral",
+    "36": "Ischemia in Inferior",
+    "37": "Ischemia in Lateral",
+    "38": "Intraventricular Conduction Disturbance",
+    "39": "Long QT",
+    "40": "Low T",
+    "41": "Low P-R",
+    "42": "Low Voltage",
+    "43": "Pacemaker",
+    "44": "Poor R Wave Progression",
+    "45": "Q Wave",
+    "46": "Right Atrial Overload/Enlargement",
+    "47": "Right Ventricular Hypertrophy",
+    "48": "Sinus Arrhythmia",
+    "49": "Bradicardia",
+    "50": "Taquicardia",
+    "51": "T Abnormality",
+    "52": "Voltage Criteria for LVH",
+    "53": "Accelerated Idioventricular Rhythm",
+    "54": "Bigeminy",
+    "55": "Bradycardia",
+    "56": "Tachycardia",
+    "57": "Trigeminy",
+    "58": "Abnormal QRS",
+    "59": "Poor R Wave Progression in Chest Leads",
+    "60": "Long QT Interval",
+    "61": "ST Depression",
+    "62": "ST Elevation",
+    "63": "Bloqueio AV",
+    "64": "Junctional Rhythm",
+    "65": "Escape Rhythm",
+    "66": "Nodal Rhythm",
+    "67": "Ventricular Rhythm",
+    "68": "Fusion Beat",
+    "69": "Aberrant Conduction",
+    "70": "Anormalidade Inespec\u00edfica"
+  },
+  "clinical_mapping": {
+    "0": "Normal",
+    "7": "Fibrila\u00e7\u00e3o Atrial",
+    "49": "Bradicardia",
+    "50": "Taquicardia",
+    "6": "Arritmia Ventricular",
+    "63": "Bloqueio AV",
+    "32": "Isquemia",
+    "1": "Infarto do Mioc\u00e1rdio",
+    "12": "Hipertrofia Ventricular",
+    "70": "Anormalidade Inespec\u00edfica"
+  },
+  "severity": {
+    "normal": [
+      0
+    ],
+    "mild": [
+      49,
+      50,
+      51
+    ],
+    "moderate": [
+      7,
+      6,
+      12,
+      63
+    ],
+    "severe": [
+      1,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37
+    ],
+    "critical": [
+      14,
+      15,
+      25
+    ]
+  },
+  "clinical_priority": {
+    "routine": [
+      0,
+      49,
+      50,
+      51
+    ],
+    "urgent": [
+      7,
+      6,
+      12,
+      63
+    ],
+    "immediate": [
+      1,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      14,
+      15,
+      25
+    ]
+  }
+}
