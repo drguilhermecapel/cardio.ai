@@ -3,10 +3,10 @@ CardioAI Pro - Aplicação Principal Unificada
 Sistema completo de análise de ECG com IA
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from contextlib import asynccontextmanager
 from typing import Dict, List, Any, Optional
 import logging
@@ -105,14 +105,22 @@ app.add_middleware(
 )
 
 # Servir arquivos estáticos
-if os.path.exists("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../static'))
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 # Endpoints principais
-@app.get("/")
-async def root():
-    """Endpoint raiz com informações do sistema."""
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    """Endpoint raiz com interface web."""
+    # Redirecionar para a interface web
+    return RedirectResponse(url="/static/index.html")
+
+
+@app.get("/api")
+async def api_root():
+    """Endpoint raiz da API com informações do sistema."""
     return {
         "name": "CardioAI Pro",
         "version": "2.0.0",
@@ -156,9 +164,9 @@ async def health_check():
             "services": {
                 "model_service": "running",
                 "ecg_service": "running",
-                "api_service": "running"
+                "api_service": "running",
+                "models_loaded": models_available
             },
-            "models_loaded": models_available,
             "system_info": {
                 "python_version": "3.11+",
                 "tensorflow": "available" if hasattr(model_service, "TENSORFLOW_AVAILABLE") and model_service.TENSORFLOW_AVAILABLE else "unavailable",

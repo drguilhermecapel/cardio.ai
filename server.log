@@ -1,25 +1,21 @@
 nohup: ignoring input
-2025-07-04 14:17:37,448 - cardioai - INFO - Dependências básicas verificadas com sucesso
-2025-07-04 14:17:37,448 - cardioai - WARNING - TensorFlow não disponível - funcionalidades limitadas
-2025-07-04 14:17:37,448 - cardioai - WARNING - PyTorch não disponível - funcionalidades limitadas
-2025-07-04 14:17:37,529 - cardioai - INFO - Matplotlib disponível - visualizações habilitadas
-2025-07-04 14:17:37,530 - cardioai - WARNING - WFDB não disponível - suporte limitado a formatos
-2025-07-04 14:17:37,530 - cardioai - WARNING - PyEDFLib não disponível - sem suporte a EDF
-2025-07-04 14:17:37,530 - cardioai - INFO - Iniciando CardioAI Pro em 0.0.0.0:12000
-2025-07-04 14:17:44,294 - backend.app.services.unified_model_service - INFO - Modelo demo criado com sucesso
-2025-07-04 14:17:44,294 - backend.app.services.unified_model_service - INFO - Modelos inicializados: ['demo_ecg_classifier']
-INFO:     Started server process [17239]
+2025-07-04 14:31:25,482 - cardioai - INFO - Dependências básicas verificadas com sucesso
+2025-07-04 14:31:25,483 - cardioai - WARNING - TensorFlow não disponível - funcionalidades limitadas
+2025-07-04 14:31:25,483 - cardioai - WARNING - PyTorch não disponível - funcionalidades limitadas
+2025-07-04 14:31:25,569 - cardioai - INFO - Matplotlib disponível - visualizações habilitadas
+2025-07-04 14:31:25,570 - cardioai - WARNING - WFDB não disponível - suporte limitado a formatos
+2025-07-04 14:31:25,570 - cardioai - WARNING - PyEDFLib não disponível - sem suporte a EDF
+2025-07-04 14:31:25,570 - cardioai - INFO - Iniciando CardioAI Pro em 0.0.0.0:12000
+2025-07-04 14:31:32,694 - backend.app.services.unified_model_service - INFO - Modelo demo criado com sucesso
+2025-07-04 14:31:32,694 - backend.app.services.unified_model_service - INFO - Modelos inicializados: ['demo_ecg_classifier']
+INFO:     Started server process [20286]
 INFO:     Waiting for application startup.
-2025-07-04 14:17:44,597 - backend.app.main_direct - INFO - Iniciando CardioAI Pro...
-2025-07-04 14:17:44,597 - backend.app.main_direct - INFO - Serviços inicializados com sucesso
-2025-07-04 14:17:44,597 - backend.app.main_direct - INFO - CardioAI Pro iniciado com sucesso
+2025-07-04 14:31:32,994 - backend.app.main_direct - INFO - Iniciando CardioAI Pro...
+2025-07-04 14:31:32,995 - backend.app.main_direct - INFO - Serviços inicializados com sucesso
+2025-07-04 14:31:32,995 - backend.app.main_direct - INFO - CardioAI Pro iniciado com sucesso
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:12000 (Press CTRL+C to quit)
-2025-07-04 14:17:51,924 - backend.app.main_direct - INFO - GET /health - Status: 200 - Time: 0.001s
-INFO:     10.2.96.12:38886 - "GET /health HTTP/1.1" 200 OK
-2025-07-04 14:18:00,261 - backend.app.main_direct - INFO - GET / - Status: 200 - Time: 0.000s
-INFO:     10.2.46.10:53424 - "GET / HTTP/1.1" 200 OK
-2025-07-04 14:18:04,965 - backend.app.main_direct - INFO - GET /api/v1/models - Status: 200 - Time: 0.000s
-INFO:     10.2.38.10:45512 - "GET /api/v1/models HTTP/1.1" 200 OK
-2025-07-04 14:18:08,718 - backend.app.main_direct - INFO - GET /api/v1/models/demo_ecg_classifier - Status: 200 - Time: 0.000s
-INFO:     10.2.38.10:45512 - "GET /api/v1/models/demo_ecg_classifier HTTP/1.1" 200 OK
+2025-07-04 14:31:39,621 - backend.app.main_direct - INFO - GET / - Status: 307 - Time: 0.000s
+INFO:     10.2.38.10:56888 - "GET / HTTP/1.1" 307 Temporary Redirect
+2025-07-04 14:31:47,767 - backend.app.main_direct - INFO - GET /static/index.html - Status: 200 - Time: 0.005s
+INFO:     10.2.97.11:35530 - "GET /static/index.html HTTP/1.1" 200 OK
