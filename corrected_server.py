@@ -988,7 +988,7 @@ async def get_model_info(model_name: str):
 async def analyze_ecg_demo():
     try:
         # Usar modelo padrão
-        model_name = "ecg_model_final"
+        model_name = "ecg_model_sklearn"
             
         # Realizar predição demo (sem dados)
         result = model_service.predict(model_name, data=None)
