@@ -56,8 +56,8 @@ def preprocess_ecg(sig, fs_in=500, fs_target=100):
     # Normalizar para mV
     sig = sig / 1000.0  # Assumindo entrada em µV
     
-    # Transpor para formato (amostras, derivações) - formato PTB-XL
-    sig = sig.T
+    # Manter formato (derivações, amostras) - formato PTB-XL
+    # Não transpor aqui, pois o modelo espera (batch, derivações, amostras)
     
     return sig.astype('float32')
 
