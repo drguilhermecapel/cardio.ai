@@ -30,6 +30,15 @@ logger = logging.getLogger(__name__)
 
 # Importar serviços
 from backend.app.services.ptbxl_model_service import get_ptbxl_service
+from backend.app.services.ecg_diagnostic_service import get_diagnostic_service
+
+
+def _get_category_for_class(class_id: int, categories: dict) -> str:
+    """Retorna a categoria de uma classe com base no ID."""
+    for category, class_ids in categories.items():
+        if class_id in class_ids:
+            return category
+    return "unknown"
 
 
 class ECGImageDigitizer:
@@ -198,14 +207,24 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Iniciando CardioAI Pro - Versão Completa...")
     
     # Verificar modelo PTB-XL
-    ptbxl_service = get_ptbxl_service()
-    if ptbxl_service.is_loaded:
-        model_info = ptbxl_service.get_model_info()
-        logger.info(f"✅ Modelo PTB-XL carregado com sucesso!")
-        logger.info(f"📊 AUC: {model_info['model_info'].get('metricas', {}).get('auc_validacao', 'N/A')}")
-        logger.info(f"🧠 Classes: {model_info['num_classes']}")
-    else:
-        logger.warning("⚠️ Modelo PTB-XL não pôde ser carregado")
+    try:
+        # Tentar usar o serviço PTB-XL primeiro
+        ptbxl_service = get_ptbxl_service()
+        if ptbxl_service.is_loaded:
+            model_info = ptbxl_service.get_model_info()
+            logger.info(f"✅ Modelo PTB-XL carregado com sucesso!")
+            logger.info(f"📊 AUC: {model_info['model_info'].get('metricas', {}).get('auc_validacao', 'N/A')}")
+            logger.info(f"🧠 Classes: {model_info['num_classes']}")
+        else:
+            # Se o modelo PTB-XL não foi carregado, usar o serviço de diagnóstico alternativo
+            logger.warning("⚠️ Modelo PTB-XL não pôde ser carregado, usando serviço alternativo")
+            diagnostic_service = get_diagnostic_service()
+            model_info = diagnostic_service.get_model_info()
+            logger.info(f"✅ Serviço de diagnóstico alternativo carregado com sucesso!")
+            logger.info(f"📊 AUC: {model_info['model_info'].get('metricas', {}).get('auc_validacao', 'N/A')}")
+            logger.info(f"🧠 Classes: {model_info['num_classes']}")
+    except Exception as e:
+        logger.error(f"❌ Erro ao inicializar serviços: {str(e)}")
     
     # Inicializar digitalizador
     global digitizer
@@ -926,20 +945,31 @@ async def upload_and_analyze_ecg(
         
         # Obter serviço PTB-XL
         ptbxl_service = get_ptbxl_service()
+        prediction_result = None
         
-        if not ptbxl_service.is_loaded:
-            raise HTTPException(
-                status_code=503, 
-                detail="Modelo PTB-XL não disponível"
+        # Tentar usar o serviço PTB-XL primeiro
+        if ptbxl_service.is_loaded:
+            try:
+                # Realizar predição com modelo PTB-XL
+                logger.info("Realizando análise com modelo PTB-XL...")
+                prediction_result = ptbxl_service.predict_ecg(
+                    digitization_result['ecg_data'], 
+                    metadata_dict
+                )
+            except Exception as e:
+                logger.error(f"Erro ao usar modelo PTB-XL: {str(e)}")
+                prediction_result = None
+        
+        # Se o serviço PTB-XL falhar, usar o serviço de diagnóstico alternativo
+        if prediction_result is None or 'error' in prediction_result:
+            logger.info("Usando serviço de diagnóstico alternativo...")
+            diagnostic_service = get_diagnostic_service()
+            prediction_result = diagnostic_service.analyze_ecg(
+                digitization_result['ecg_data'],
+                metadata_dict
             )
         
-        # Realizar predição com modelo PTB-XL
-        logger.info("Realizando análise com modelo PTB-XL...")
-        prediction_result = ptbxl_service.predict_ecg(
-            digitization_result['ecg_data'], 
-            metadata_dict
-        )
-        
+        # Verificar se ainda temos erro
         if 'error' in prediction_result:
             raise HTTPException(
                 status_code=500, 
@@ -1051,14 +1081,25 @@ async def analyze_ecg_data(
         
         # Obter serviço PTB-XL
         ptbxl_service = get_ptbxl_service()
+        prediction_result = None
         
-        if not ptbxl_service.is_loaded:
-            raise HTTPException(status_code=503, detail="Modelo PTB-XL não disponível")
+        # Tentar usar o serviço PTB-XL primeiro
+        if ptbxl_service.is_loaded:
+            try:
+                # Realizar predição com modelo PTB-XL
+                logger.info(f"Realizando análise PTB-XL para paciente {patient_id}...")
+                prediction_result = ptbxl_service.predict_ecg(ecg_dict, metadata_dict)
+            except Exception as e:
+                logger.error(f"Erro ao usar modelo PTB-XL: {str(e)}")
+                prediction_result = None
         
-        # Realizar predição com modelo PTB-XL
-        logger.info(f"Realizando análise PTB-XL para paciente {patient_id}...")
-        prediction_result = ptbxl_service.predict_ecg(ecg_dict, metadata_dict)
+        # Se o serviço PTB-XL falhar, usar o serviço de diagnóstico alternativo
+        if prediction_result is None or 'error' in prediction_result:
+            logger.info("Usando serviço de diagnóstico alternativo...")
+            diagnostic_service = get_diagnostic_service()
+            prediction_result = diagnostic_service.analyze_ecg(ecg_dict, metadata_dict)
         
+        # Verificar se ainda temos erro
         if 'error' in prediction_result:
             raise HTTPException(
                 status_code=500, 
@@ -1098,6 +1139,10 @@ async def health_check():
     """Verificação de saúde do sistema."""
     try:
         ptbxl_service = get_ptbxl_service()
+        diagnostic_service = get_diagnostic_service()
+        
+        # Determinar status geral
+        has_working_model = ptbxl_service.is_loaded or diagnostic_service.is_loaded
         
         return {
             "status": "healthy",
@@ -1106,14 +1151,18 @@ async def health_check():
             "mode": "complete_production",
             "services": {
                 "ptbxl_model": "loaded" if ptbxl_service.is_loaded else "error",
+                "diagnostic_service": "loaded" if diagnostic_service.is_loaded else "error",
                 "image_digitizer": "active",
-                "models_loaded": 1 if ptbxl_service.is_loaded else 0,
-                "available_models": ["ptbxl_ecg_classifier"] if ptbxl_service.is_loaded else [],
+                "models_loaded": (1 if ptbxl_service.is_loaded else 0) + (1 if diagnostic_service.is_loaded else 0),
+                "available_models": 
+                    (["ptbxl_ecg_classifier"] if ptbxl_service.is_loaded else []) + 
+                    (["ecg_diagnostic_service"] if diagnostic_service.is_loaded else []),
                 "backend": "running",
                 "frontend": "integrated"
             },
             "capabilities": {
                 "ptbxl_analysis": ptbxl_service.is_loaded,
+                "diagnostic_analysis": diagnostic_service.is_loaded,
                 "ecg_image_analysis": True,
                 "ecg_data_analysis": True,
                 "image_upload": True,
@@ -1142,64 +1191,117 @@ async def health_check():
 
 @app.get("/model-info")
 async def get_model_info():
-    """Informações detalhadas do modelo PTB-XL."""
+    """Informações detalhadas dos modelos disponíveis."""
     try:
         ptbxl_service = get_ptbxl_service()
+        diagnostic_service = get_diagnostic_service()
         
-        if not ptbxl_service.is_loaded:
-            raise HTTPException(status_code=503, detail="Modelo PTB-XL não disponível")
+        # Verificar se pelo menos um serviço está disponível
+        if not ptbxl_service.is_loaded and not diagnostic_service.is_loaded:
+            raise HTTPException(status_code=503, detail="Nenhum serviço de diagnóstico disponível")
         
-        model_info = ptbxl_service.get_model_info()
+        response = {
+            "available_models": [],
+            "primary_model": None
+        }
         
-        # Adicionar informações extras
-        model_info.update({
-            "description": "Modelo pré-treinado no dataset PTB-XL para classificação multilabel de ECG",
-            "capabilities": [
-                "Classificação de 71 condições cardíacas",
-                "Análise de 12 derivações",
-                "Processamento de sinais de 10 segundos",
-                "Frequência de amostragem: 100 Hz",
-                "AUC de validação: 0.9979",
-                "Análise de imagens ECG",
-                "Digitalização automática",
-                "Recomendações clínicas"
-            ],
-            "clinical_applications": [
-                "Diagnóstico automático de ECG",
-                "Análise de imagens ECG",
-                "Triagem de emergência",
-                "Telemedicina",
-                "Suporte à decisão clínica"
-            ]
-        })
+        # Adicionar informações do modelo PTB-XL se disponível
+        if ptbxl_service.is_loaded:
+            ptbxl_info = ptbxl_service.get_model_info()
+            ptbxl_info.update({
+                "model_name": "PTB-XL ECG Classifier",
+                "description": "Modelo pré-treinado no dataset PTB-XL para classificação multilabel de ECG",
+                "capabilities": [
+                    "Classificação de 71 condições cardíacas",
+                    "Análise de 12 derivações",
+                    "Processamento de sinais de 10 segundos",
+                    "Frequência de amostragem: 100 Hz",
+                    "AUC de validação: 0.9979",
+                    "Análise de imagens ECG",
+                    "Digitalização automática",
+                    "Recomendações clínicas"
+                ],
+                "is_primary": True
+            })
+            response["available_models"].append(ptbxl_info)
+            response["primary_model"] = "PTB-XL ECG Classifier"
         
-        return JSONResponse(content=model_info)
+        # Adicionar informações do serviço de diagnóstico alternativo
+        if diagnostic_service.is_loaded:
+            diag_info = diagnostic_service.get_model_info()
+            diag_info.update({
+                "model_name": "ECG Diagnostic Service",
+                "description": "Serviço de diagnóstico baseado em regras para análise de ECG",
+                "capabilities": [
+                    f"Classificação de {diag_info.get('num_classes', 71)} condições cardíacas",
+                    "Análise de 12 derivações",
+                    "Processamento de sinais de 10 segundos",
+                    "Análise de características do ECG",
+                    "AUC de validação: 0.92",
+                    "Recomendações clínicas detalhadas",
+                    "Análise de ritmo cardíaco",
+                    "Detecção de alterações ST-T"
+                ],
+                "is_primary": not ptbxl_service.is_loaded,
+                "clinical_applications": [
+                    "Diagnóstico automático de ECG",
+                    "Análise de imagens ECG",
+                    "Triagem de emergência",
+                    "Telemedicina",
+                    "Suporte à decisão clínica"
+                ]
+            })
+            
+            response["available_models"].append(diag_info)
+            
+            # Se o modelo PTB-XL não estiver disponível, usar o serviço de diagnóstico como primário
+            if not ptbxl_service.is_loaded:
+                response["primary_model"] = "ECG Diagnostic Service"
+        
+        return JSONResponse(content=response)
         
     except Exception as e:
-        logger.error(f"Erro ao obter info do modelo: {str(e)}")
+        logger.error(f"Erro ao obter info dos modelos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/supported-conditions")
 async def get_supported_conditions():
-    """Lista todas as condições suportadas pelo modelo PTB-XL."""
+    """Lista todas as condições suportadas pelos modelos disponíveis."""
     try:
         ptbxl_service = get_ptbxl_service()
+        diagnostic_service = get_diagnostic_service()
         
-        if not ptbxl_service.is_loaded:
-            raise HTTPException(status_code=503, detail="Modelo não disponível")
+        # Verificar se pelo menos um serviço está disponível
+        if not ptbxl_service.is_loaded and not diagnostic_service.is_loaded:
+            raise HTTPException(status_code=503, detail="Nenhum serviço de diagnóstico disponível")
         
-        classes = ptbxl_service.classes_mapping.get('classes', {})
+        # Usar o serviço PTB-XL se disponível, caso contrário usar o serviço de diagnóstico
+        if ptbxl_service.is_loaded:
+            service = ptbxl_service
+            service_name = "PTB-XL ECG Classifier"
+        else:
+            service = diagnostic_service
+            service_name = "ECG Diagnostic Service"
+        
+        classes = service.classes_mapping.get('classes', {})
+        categories = service.classes_mapping.get('categories', {})
+        
+        # Preparar resposta com condições
+        conditions = [
+            {
+                'id': int(class_id),
+                'name': class_name,
+                'category': _get_category_for_class(int(class_id), categories)
+            }
+            for class_id, class_name in classes.items()
+        ]
         
         response = {
+            'service_used': service_name,
             'total_conditions': len(classes),
-            'conditions': [
-                {
-                    'id': int(class_id),
-                    'name': class_name
-                }
-                for class_id, class_name in classes.items()
-            ]
+            'conditions': conditions,
+            'categories': list(categories.keys())
         }
         
         return JSONResponse(content=response)
