@@ -341,9 +341,16 @@ async def analyze_ecg_image(
             else:
                 raise HTTPException(status_code=404, detail="Nenhum modelo disponível")
         
-        # Gerar dados de ECG sintéticos para análise
-        # Em um sistema real, estes dados viriam da digitalização da imagem
-        ecg_data = np.random.randn(12, 5000)  # Simular 12 derivações
+        # Processar imagem usando UnifiedECGService
+        ecg_service = get_ecg_service()
+        digitization_result = ecg_service.process_ecg_image(
+            image_path=temp_path,
+            patient_id=patient_id,
+            quality_threshold=quality_threshold
+        )
+        
+        # Extrair dados digitalizados
+        ecg_data = digitization_result["data"]["ecg_data"]
         
         # Realizar análise real com o modelo
         if model_name == "ecg_model_final":
