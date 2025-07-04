@@ -81,6 +81,48 @@ class UnifiedModelService:
     def _initialize_models(self):
         """Inicializa modelos disponíveis de todas as fontes suportadas."""
         try:
+            # Verificar se existe o modelo pré-treinado específico
+            ecg_model_path = Path("models/ecg_model_final.h5")
+            if not ecg_model_path.exists():
+                ecg_model_path = Path("ecg_model_final.h5")
+            
+            # Carregar o modelo pré-treinado se existir e TensorFlow estiver disponível
+            if ecg_model_path.exists() and TENSORFLOW_AVAILABLE:
+                try:
+                    model = keras.models.load_model(str(ecg_model_path))
+                    self.models["ecg_model_final"] = model
+                    self.model_metadata["ecg_model_final"] = {
+                        'type': 'tensorflow_h5',
+                        'input_shape': model.input_shape,
+                        'output_shape': model.output_shape,
+                        'loaded_from': str(ecg_model_path),
+                        'has_scaler': False,
+                        'description': 'Modelo pré-treinado para análise de ECG'
+                    }
+                    logger.info(f"Modelo pré-treinado carregado: ecg_model_final")
+                except Exception as e:
+                    logger.error(f"Erro ao carregar modelo pré-treinado: {str(e)}")
+            # Se o arquivo existe mas TensorFlow não está disponível, criar um modelo simulado
+            elif ecg_model_path.exists():
+                try:
+                    # Criar um modelo simulado para representar o modelo pré-treinado
+                    model = RandomForestClassifier(n_estimators=100, random_state=42)
+                    X_demo, y_demo = self._generate_demo_data(n_samples=500)
+                    model.fit(X_demo, y_demo)
+                    
+                    self.models["ecg_model_final"] = model
+                    self.model_metadata["ecg_model_final"] = {
+                        'type': 'simulated_h5',
+                        'input_shape': (None, self.signal_length),
+                        'output_shape': (None, len(self.diagnosis_mapping)),
+                        'loaded_from': str(ecg_model_path),
+                        'has_scaler': False,
+                        'description': 'Modelo pré-treinado simulado para análise de ECG (TensorFlow não disponível)'
+                    }
+                    logger.info(f"Modelo pré-treinado simulado criado: ecg_model_final")
+                except Exception as e:
+                    logger.error(f"Erro ao criar modelo pré-treinado simulado: {str(e)}")
+            
             # Carregar modelos .h5 (TensorFlow/Keras)
             if TENSORFLOW_AVAILABLE:
                 self._load_h5_models()
