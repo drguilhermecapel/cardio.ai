@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CardioAI Pro - Análise de ECG com IA</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .main-card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+
+        .upload-section {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 60px 20px;
+            background: #f8f9ff;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+            transform: translateY(-2px);
+        }
+
+        .upload-area.dragover {
+            border-color: #4CAF50;
+            background: #e8f5e8;
+        }
+
+        .upload-icon {
+            font-size: 4rem;
+            color: #667eea;
+            margin-bottom: 20px;
+        }
+
+        .upload-text {
+            font-size: 1.3rem;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .upload-subtext {
+            color: #999;
+            font-size: 0.9rem;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-section {
+            margin: 30px 0;
+            padding: 20px;
+            border-radius: 15px;
+            background: #f8f9ff;
+            border-left: 5px solid #667eea;
+        }
+
+        .status-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .status-text {
+            color: #666;
+        }
+
+        .results-section {
+            margin-top: 30px;
+            padding: 30px;
+            background: linear-gradient(135deg, #f8f9ff 0%, #e8f5e8 100%);
+            border-radius: 15px;
+            border: 2px solid #e0e7ff;
+        }
+
+        .diagnosis-card {
+            background: white;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-left: 5px solid #667eea;
+            transition: transform 0.2s ease;
+        }
+
+        .diagnosis-card:hover {
+            transform: translateX(5px);
+        }
+
+        .diagnosis-name {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .diagnosis-probability {
+            font-size: 1.1rem;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .diagnosis-confidence {
+            font-size: 0.9rem;
+            padding: 4px 12px;
+            border-radius: 20px;
+            display: inline-block;
+        }
+
+        .confidence-high {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+
+        .confidence-medium {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+
+        .confidence-low {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 5px solid #c62828;
+        }
+
+        .success {
+            background: #e8f5e8;
+            color: #2e7d32;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 5px solid #2e7d32;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .info-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease;
+        }
+
+        .info-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .info-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+        }
+
+        .info-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .info-text {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .main-card {
+                padding: 20px;
+            }
+            
+            .upload-area {
+                padding: 40px 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🫀 CardioAI Pro</h1>
+            <p>Sistema Avançado de Análise de ECG com Inteligência Artificial</p>
+        </div>
+
+        <div class="main-card">
+            <div class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">Arraste seu arquivo ECG aqui ou clique para selecionar</div>
+                    <div class="upload-subtext">Suporte para: CSV, TXT, NPY, JPG, PNG (máx. 10MB)</div>
+                    <input type="file" id="fileInput" class="file-input" accept=".csv,.txt,.npy,.jpg,.jpeg,.png">
+                </div>
+                
+                <button class="btn" id="analyzeBtn" disabled>🔬 Analisar ECG</button>
+            </div>
+
+            <div class="status-section" id="statusSection" style="display: none;">
+                <div class="status-title">Status do Processamento</div>
+                <div class="status-text" id="statusText">Aguardando arquivo...</div>
+            </div>
+
+            <div class="loading" id="loadingSection">
+                <div class="spinner"></div>
+                <div>Processando ECG com IA...</div>
+            </div>
+
+            <div class="results-section" id="resultsSection" style="display: none;">
+                <h3>📊 Resultados da Análise</h3>
+                <div id="diagnosisResults"></div>
+            </div>
+        </div>
+
+        <div class="info-grid">
+            <div class="info-card">
+                <div class="info-icon">🧠</div>
+                <div class="info-title">IA Avançada</div>
+                <div class="info-text">Modelo treinado com 71 condições cardíacas diferentes</div>
+            </div>
+            <div class="info-card">
+                <div class="info-icon">⚡</div>
+                <div class="info-title">Análise Rápida</div>
+                <div class="info-text">Resultados em segundos com alta precisão</div>
+            </div>
+            <div class="info-card">
+                <div class="info-icon">🔒</div>
+                <div class="info-title">Seguro</div>
+                <div class="info-text">Processamento local, dados não armazenados</div>
+            </div>
+            <div class="info-card">
+                <div class="info-icon">📱</div>
+                <div class="info-title">Multiplataforma</div>
+                <div class="info-text">Funciona em qualquer dispositivo</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://8001-iyv5qeky2ds1x06rhqju4-10e6e8b4.manusvm.computer';
+        
+        let currentProcessId = null;
+        let selectedFile = null;
+
+        // Elementos DOM
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const statusSection = document.getElementById('statusSection');
+        const statusText = document.getElementById('statusText');
+        const loadingSection = document.getElementById('loadingSection');
+        const resultsSection = document.getElementById('resultsSection');
+        const diagnosisResults = document.getElementById('diagnosisResults');
+
+        // Event listeners
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', handleDragOver);
+        uploadArea.addEventListener('dragleave', handleDragLeave);
+        uploadArea.addEventListener('drop', handleDrop);
+        fileInput.addEventListener('change', handleFileSelect);
+        analyzeBtn.addEventListener('click', analyzeECG);
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        }
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        }
+
+        function handleFile(file) {
+            // Validar tipo de arquivo
+            const allowedTypes = ['.csv', '.txt', '.npy', '.jpg', '.jpeg', '.png'];
+            const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
+            
+            if (!allowedTypes.includes(fileExtension)) {
+                showError('Tipo de arquivo não suportado. Use: CSV, TXT, NPY, JPG, PNG');
+                return;
+            }
+
+            // Validar tamanho (10MB)
+            if (file.size > 10 * 1024 * 1024) {
+                showError('Arquivo muito grande. Máximo: 10MB');
+                return;
+            }
+
+            selectedFile = file;
+            updateStatus(`Arquivo selecionado: ${file.name} (${formatFileSize(file.size)})`);
+            analyzeBtn.disabled = false;
+            
+            // Atualizar visual do upload area
+            uploadArea.innerHTML = `
+                <div class="upload-icon">✅</div>
+                <div class="upload-text">Arquivo carregado: ${file.name}</div>
+                <div class="upload-subtext">Clique em "Analisar ECG" para continuar</div>
+            `;
+        }
+
+        async function analyzeECG() {
+            if (!selectedFile) return;
+
+            try {
+                showLoading(true);
+                updateStatus('Enviando arquivo para análise...');
+
+                // Upload do arquivo
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+
+                const uploadResponse = await fetch(`${API_BASE}/api/v1/ecg/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const uploadResult = await uploadResponse.json();
+
+                if (uploadResult.error) {
+                    throw new Error(uploadResult.error);
+                }
+
+                currentProcessId = uploadResult.process_id;
+                updateStatus('Arquivo processado. Executando análise com IA...');
+
+                // Análise do ECG
+                const analyzeResponse = await fetch(`${API_BASE}/api/v1/ecg/analyze/${currentProcessId}`, {
+                    method: 'POST'
+                });
+
+                const analyzeResult = await analyzeResponse.json();
+
+                if (analyzeResult.error) {
+                    throw new Error(analyzeResult.error);
+                }
+
+                showResults(analyzeResult);
+                updateStatus('Análise concluída com sucesso!');
+
+            } catch (error) {
+                showError(`Erro na análise: ${error.message}`);
+                updateStatus('Erro na análise. Tente novamente.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function showResults(results) {
+            const diagnoses = results.diagnoses || [];
+            
+            let html = `
+                <div style="margin-bottom: 20px;">
+                    <strong>Análise realizada em:</strong> ${new Date(results.analysis_timestamp).toLocaleString('pt-BR')}
+                </div>
+            `;
+
+            if (diagnoses.length === 0) {
+                html += '<div class="diagnosis-card"><div class="diagnosis-name">Nenhum diagnóstico específico encontrado</div></div>';
+            } else {
+                diagnoses.forEach(diagnosis => {
+                    const probability = (diagnosis.probability * 100).toFixed(1);
+                    const confidenceClass = `confidence-${diagnosis.confidence}`;
+                    
+                    html += `
+                        <div class="diagnosis-card">
+                            <div class="diagnosis-name">${diagnosis.condition}</div>
+                            <div class="diagnosis-probability">Probabilidade: ${probability}%</div>
+                            <span class="diagnosis-confidence ${confidenceClass}">
+                                Confiança: ${diagnosis.confidence.toUpperCase()}
+                            </span>
+                        </div>
+                    `;
+                });
+            }
+
+            diagnosisResults.innerHTML = html;
+            resultsSection.style.display = 'block';
+        }
+
+        function showLoading(show) {
+            loadingSection.style.display = show ? 'block' : 'none';
+            analyzeBtn.disabled = show;
+        }
+
+        function updateStatus(message) {
+            statusText.textContent = message;
+            statusSection.style.display = 'block';
+        }
+
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+            
+            // Remover erros anteriores
+            const existingErrors = document.querySelectorAll('.error');
+            existingErrors.forEach(error => error.remove());
+            
+            statusSection.parentNode.insertBefore(errorDiv, statusSection.nextSibling);
+            
+            setTimeout(() => errorDiv.remove(), 5000);
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // Verificar status da API ao carregar
+        async function checkAPIStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const status = await response.json();
+                
+                if (status.status === 'healthy') {
+                    updateStatus('Sistema pronto para análise');
+                } else {
+                    updateStatus('Sistema com problemas. Tente novamente mais tarde.');
+                }
+            } catch (error) {
+                updateStatus('Erro de conexão com o servidor');
+            }
+        }
+
+        // Verificar status ao carregar a página
+        checkAPIStatus();
+    </script>
+</body>
+</html>
+
