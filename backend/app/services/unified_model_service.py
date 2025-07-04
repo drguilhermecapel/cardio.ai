@@ -727,6 +727,51 @@ class UnifiedModelService:
             logger.error(f"Erro ao adicionar modelo .h5: {str(e)}")
             return False
 
+    def predict(self, model_name: str, input_data: np.ndarray) -> Dict[str, Any]:
+        """
+        Método de compatibilidade para predição.
+        
+        Args:
+            model_name: Nome do modelo
+            input_data: Dados de entrada
+            
+        Returns:
+            Resultado da predição
+        """
+        try:
+            if model_name not in self.models:
+                return {"error": f"Modelo '{model_name}' não encontrado"}
+            
+            model = self.models[model_name]
+            model_meta = self.model_metadata[model_name]
+            
+            # Fazer predição baseada no tipo do modelo
+            if model_meta['type'] == 'tensorflow_h5':
+                # Para modelos TensorFlow, usar diretamente
+                predictions = model.predict(input_data, verbose=0)
+                return {"predictions": predictions}
+            else:
+                # Para outros tipos, usar predict_ecg
+                # Converter para formato 1D se necessário
+                if input_data.ndim == 3:
+                    # (batch, leads, samples) -> (leads * samples,)
+                    flattened = input_data.reshape(input_data.shape[0], -1)
+                    ecg_data = flattened[0]  # Primeiro item do batch
+                else:
+                    ecg_data = input_data.flatten()
+                
+                result = self.predict_ecg(model_name, ecg_data)
+                if "error" in result:
+                    return result
+                
+                # Converter resultado para formato esperado
+                predictions = np.array([result.get("probabilities", [0] * len(self.diagnosis_mapping))])
+                return {"predictions": predictions}
+                
+        except Exception as e:
+            logger.error(f"Erro na predição: {e}")
+            return {"error": str(e)}
+
 
 # Instância global do serviço unificado
 unified_model_service = UnifiedModelService()
