@@ -16,6 +16,9 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 
+# Importação do novo roteador para ECG Image Processing
+from app.api.v1 import ecg_image_endpoints
+
 # Configurar logging
 logging.basicConfig(
     level=logging.INFO,
@@ -99,6 +102,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Registrar o roteador para o novo endpoint de imagem ECG
+app.include_router(ecg_image_endpoints.router, prefix="/api/v1/ecg-image", tags=["ECG Image Processing"])
 
 # Servir arquivos estáticos
 if os.path.exists("static"):

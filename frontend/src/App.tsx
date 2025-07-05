@@ -36,6 +36,7 @@ import LoginPage from './pages/LoginPage'
 import MedicalCard from './components/ui/MedicalCard'
 import ECGVisualization from './components/ui/ECGVisualization'
 import AIInsightPanel from './components/ui/AIInsightPanel'
+import ECGImageAnalysisPage from './pages/ECGImageAnalysisPage'
 
 const CardioApp = (): JSX.Element => {
   const [activeModule, setActiveModule] = useState('dashboard')
@@ -73,6 +74,12 @@ const CardioApp = (): JSX.Element => {
       name: 'IA Diagnóstica',
       icon: BrainCircuit,
       color: 'from-orange-500 to-red-500',
+    },
+    {
+      id: 'ecg-image-analysis',
+      name: 'Análise de Imagem',
+      icon: ScanLine,
+      color: 'from-teal-500 to-blue-500',
     },
     {
       id: 'telemedicine',
@@ -707,6 +714,8 @@ const CardioApp = (): JSX.Element => {
     switch (activeModule) {
       case 'dashboard':
         return <DashboardModule />
+      case 'ecg-image-analysis':
+        return <ECGImageAnalysisPage />
       default:
         return (
           <div className="flex items-center justify-center h-[calc(100vh-200px)]">

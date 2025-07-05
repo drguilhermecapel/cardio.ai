@@ -3,6 +3,14 @@
 
 import axios, { AxiosInstance } from 'axios'
 
+// Assumindo que a configuração do apiClient já existe
+const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
 // Types
 interface Patient {
   id: string
@@ -557,4 +565,50 @@ export class MedicalAPIService {
 export const medicalAPI = new MedicalAPIService()
 
 export default medicalAPI
+
+
+
+// --- INÍCIO DA ADIÇÃO PARA ECG-DIGITISER ---
+
+/**
+ * Define a estrutura de dados esperada do backend para um ECG digitalizado.
+ */
+export interface DigitizedECGData {
+  signal_data: number[][];
+  sampling_rate: number;
+  lead_names: string[];
+}
+
+/**
+ * Envia uma imagem de ECG para o backend para digitalização.
+ * @param imageFile O arquivo de imagem (PNG, JPG) a ser processado.
+ * @param onUploadProgress Callback opcional para monitorar o progresso do upload.
+ * @returns Uma promessa que resolve para os dados do ECG digitalizado.
+ */
+export const digitizeECGImage = async (
+  imageFile: File,
+  onUploadProgress?: (progressEvent: any) => void
+): Promise<DigitizedECGData> => {
+  const formData = new FormData();
+  formData.append('file', imageFile);
+
+  try {
+    const response = await apiClient.post<DigitizedECGData>('/ecg-image/digitize', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress,
+    });
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      // Propaga a mensagem de erro detalhada do backend
+      throw new Error(error.response.data.detail || 'Falha ao digitalizar a imagem.');
+    }
+    // Erro genérico para problemas de rede ou outros
+    throw new Error('Não foi possível conectar ao servidor. Verifique sua conexão de rede.');
+  }
+};
+
+// --- FIM DA ADIÇÃO PARA ECG-DIGITISER ---
 
