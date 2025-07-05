@@ -36,11 +36,23 @@ async def lifespan(app: FastAPI):
         from app.services.unified_model_service import get_model_service
         from app.services.unified_ecg_service import get_ecg_service
         
+        # NOVO: Importar serviço com correção de viés
+        from app.services.ptbxl_model_service_bias_corrected import PTBXLModelServiceBiasCorrected
+        from app.utils.clinical_explanations_simple import ClinicalExplanationService
+        
         # Inicializar serviços
         model_service = get_model_service()
         ecg_service = get_ecg_service()
         
-        logger.info("Serviços inicializados com sucesso")
+        # NOVO: Inicializar serviço com correção de viés
+        bias_corrected_service = PTBXLModelServiceBiasCorrected()
+        clinical_explanations = ClinicalExplanationService()
+        
+        # Configurar serviço com correção de viés como padrão
+        app.state.bias_corrected_service = bias_corrected_service
+        app.state.clinical_explanations = clinical_explanations
+        
+        logger.info("Serviços inicializados com sucesso (incluindo correção de viés)")
         
         # Criar diretórios necessários
         os.makedirs("models", exist_ok=True)
@@ -256,6 +268,43 @@ async def upload_ecg(
     
     except Exception as e:
         logger.error(f"Erro no upload de ECG: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/ecg/analyze-bias-corrected")
+async def analyze_ecg_bias_corrected(
+    ecg_data: Dict[str, Any]
+):
+    """
+    Analisa ECG usando o serviço com correção de viés.
+    
+    Args:
+        ecg_data: Dados do ECG para análise
+    """
+    try:
+        # Obter serviços do estado da aplicação
+        bias_corrected_service = app.state.bias_corrected_service
+        clinical_explanations = app.state.clinical_explanations
+        
+        # Processar ECG com correção de viés
+        result = bias_corrected_service.predict(ecg_data.get('signal', []))
+        
+        # Adicionar explicação clínica
+        if 'predicted_class' in result:
+            explanation = clinical_explanations.get_explanation(result['predicted_class'])
+            result['clinical_explanation'] = explanation
+        
+        # Adicionar informações sobre correção de viés
+        result['bias_correction'] = {
+            'enabled': True,
+            'service': 'PTBXLModelServiceBiasCorrected',
+            'description': 'Análise com correção de viés para diagnósticos mais precisos'
+        }
+        
+        return result
+    
+    except Exception as e:
+        logger.error(f"Erro na análise com correção de viés: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

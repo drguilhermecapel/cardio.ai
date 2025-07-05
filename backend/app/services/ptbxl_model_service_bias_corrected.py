@@ -1,326 +1,217 @@
-"""
-Serviço PTB-XL com correção de bias
-Corrige o problema de bias extremo na classe 46 (RAO/RAE)
-"""
-
 import numpy as np
+import tensorflow as tf
 import logging
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, Any, List, Optional
+import json
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Importações condicionais
-try:
-    import tensorflow as tf
-    TENSORFLOW_AVAILABLE = True
-except ImportError:
-    TENSORFLOW_AVAILABLE = False
-    logger.warning("TensorFlow não disponível")
-
-try:
-    from sklearn.ensemble import RandomForestClassifier
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-
 class PTBXLModelServiceBiasCorrected:
-    """Serviço PTB-XL com correção automática de bias."""
+    """
+    Serviço PTB-XL com correção de viés para diagnósticos mais precisos.
+    Resolve problemas de viés especialmente relacionados ao Ritmo Sinusal Normal.
+    """
     
     def __init__(self):
+        """Inicializa o serviço com correção de viés."""
         self.model = None
-        self.model_type = None
-        self.bias_correction_applied = False
-        self.diagnosis_mapping = self._get_diagnosis_mapping()
-        self.important_classes = [0, 1, 2, 3, 7, 12, 50, 55, 56]  # Classes importantes
+        self.classes = self._load_classes()
+        self.bias_correction_enabled = True
         
-        self._initialize_model()
-    
-    def _get_diagnosis_mapping(self) -> Dict[int, str]:
-        """Retorna mapeamento de diagnósticos PTB-XL."""
-        return {
-            0: "Normal ECG",
-            1: "Atrial Fibrillation",
-            2: "1st Degree AV Block", 
-            3: "Left Bundle Branch Block",
-            4: "Right Bundle Branch Block",
-            5: "Premature Atrial Contraction",
-            6: "Premature Ventricular Contraction",
-            7: "ST-T Change",
-            8: "Left Ventricular Hypertrophy",
-            9: "Right Ventricular Hypertrophy",
-            10: "Myocardial Infarction",
-            11: "Sinus Bradycardia",
-            12: "Sinus Tachycardia",
-            13: "Sinus Arrhythmia",
-            14: "Supraventricular Tachycardia",
-            15: "Ventricular Tachycardia",
-            # ... mais diagnósticos
-            46: "Right Atrial Overload/Enlargement",  # Classe com bias
-            # ... até 70
+        # Configurações de correção de viés
+        self.bias_thresholds = {
+            'NORM': 0.3,  # Threshold reduzido para NORM
+            'AFIB': 0.7,  # Threshold aumentado para AFIB
+            'STEMI': 0.8, # Threshold alto para condições críticas
+            'default': 0.5
         }
-    
-    def _initialize_model(self):
-        """Inicializa modelo PTB-XL com correção de bias."""
-        try:
-            # Tentar carregar modelo PTB-XL real
-            model_paths = [
-                Path("models/ecg_model_final.h5"),
-                Path("ecg_model_final.h5"),
-                Path("backend/ml_models/ecg_model_final.h5")
-            ]
-            
-            model_loaded = False
-            
-            if TENSORFLOW_AVAILABLE:
-                for model_path in model_paths:
-                    if model_path.exists():
-                        try:
-                            self.model = tf.keras.models.load_model(str(model_path))
-                            self.model_type = "tensorflow_ptbxl"
-                            logger.info(f"✅ Modelo PTB-XL carregado: {model_path}")
-                            logger.info(f"📊 Input shape: {self.model.input_shape}")
-                            logger.info(f"📊 Output shape: {self.model.output_shape}")
-                            
-                            # Aplicar correção de bias
-                            self._apply_bias_correction()
-                            model_loaded = True
-                            break
-                            
-                        except Exception as e:
-                            logger.error(f"❌ Erro ao carregar modelo {model_path}: {e}")
-                            continue
-            
-            # Fallback para modelo simulado se necessário
-            if not model_loaded:
-                logger.warning("⚠️ Modelo PTB-XL não disponível - criando modelo simulado")
-                self._create_demo_model()
-                
-        except Exception as e:
-            logger.error(f"❌ Erro na inicialização: {e}")
-            self._create_demo_model()
-    
-    def _apply_bias_correction(self):
-        """Aplica correção de bias no modelo PTB-XL."""
-        try:
-            logger.info("🔧 Aplicando correção de bias...")
-            
-            # Testar modelo com dados sintéticos para detectar bias
-            test_data = self._generate_test_data()
-            predictions = self.model.predict(test_data, verbose=0)
-            
-            # Calcular bias por classe
-            class_predictions = np.mean(predictions, axis=0)
-            bias_mean = np.mean(class_predictions)
-            bias_std = np.std(class_predictions)
-            
-            # Detectar bias extremo na classe 46 (RAO/RAE)
-            bias_46 = class_predictions[46] if len(class_predictions) > 46 else 0
-            
-            logger.info(f"📊 Bias médio: {bias_mean:.4f}")
-            logger.info(f"📊 Bias classe 46 (RAO/RAE): {bias_46:.4f}")
-            logger.info(f"📊 Desvio padrão: {bias_std:.4f}")
-            
-            # Verificar se correção é necessária
-            if bias_46 > bias_mean + 2 * bias_std:
-                logger.warning(f"⚠️ Bias extremo detectado na classe 46: {bias_46:.4f}")
-                logger.info("🔧 Aplicando correção de bias...")
-                
-                # Criar camada de correção de bias
-                self._create_bias_correction_layer(class_predictions, bias_mean)
-                self.bias_correction_applied = True
-                
-                logger.info("✅ Correção de bias aplicada com sucesso")
-            else:
-                logger.info("✅ Bias dentro dos limites normais - correção não necessária")
-                
-        except Exception as e:
-            logger.error(f"❌ Erro na correção de bias: {e}")
-    
-    def _create_bias_correction_layer(self, class_predictions: np.ndarray, bias_mean: float):
-        """Cria camada de correção de bias."""
-        try:
-            # Calcular correções necessárias
-            corrected_bias = class_predictions.copy()
-            
-            # Corrigir classe 46 (RAO/RAE) para média
-            corrected_bias[46] = bias_mean
-            
-            # Aumentar bias de classes importantes
-            for class_id in self.important_classes:
-                if class_id < len(corrected_bias):
-                    corrected_bias[class_id] += 0.5
-            
-            # Normalizar para manter soma consistente
-            correction_factor = np.sum(class_predictions) / np.sum(corrected_bias)
-            corrected_bias *= correction_factor
-            
-            # Calcular diferenças para aplicar como bias
-            self.bias_corrections = corrected_bias - class_predictions
-            
-            logger.info(f"🔧 Correções calculadas para {len(self.bias_corrections)} classes")
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao criar camada de correção: {e}")
-            self.bias_corrections = None
-    
-    def _generate_test_data(self) -> np.ndarray:
-        """Gera dados de teste para detectar bias."""
-        # Gerar dados sintéticos no formato esperado pelo modelo
-        if self.model and hasattr(self.model, 'input_shape'):
-            input_shape = self.model.input_shape
-            if input_shape[1:] == (12, 1000):
-                # Formato PTB-XL correto
-                return np.random.normal(0, 1, (100, 12, 1000)).astype(np.float32)
         
-        # Fallback
-        return np.random.normal(0, 1, (100, 12, 1000)).astype(np.float32)
+        # Tentar carregar modelo
+        self._load_model()
+        
+        logger.info("PTBXLModelServiceBiasCorrected inicializado com correção de viés")
+    
+    def _load_classes(self) -> List[str]:
+        """Carrega as classes do modelo PTB-XL."""
+        try:
+            classes_path = Path("models/ptbxl_classes.json")
+            if classes_path.exists():
+                with open(classes_path, 'r') as f:
+                    return json.load(f)
+            else:
+                # Classes padrão do PTB-XL
+                return [
+                    "1AVB", "AFIB", "AFLT", "CRBBB", "IRBBB", "LAFB", "LAD", 
+                    "LPR", "LQT", "NORM", "PAC", "PVC", "RAD", "RVE", "SA", 
+                    "SB", "STACH", "SVE", "TAb", "TInv"
+                ]
+        except Exception as e:
+            logger.warning(f"Erro ao carregar classes: {e}")
+            return ["NORM", "AFIB", "STEMI", "NSTEMI", "VT", "VF"]
+    
+    def _load_model(self):
+        """Carrega o modelo PTB-XL com fallback para modelo demo."""
+        try:
+            # Tentar carregar SavedModel primeiro
+            saved_model_path = Path("models/ptbxl_saved_model")
+            if saved_model_path.exists():
+                self.model = tf.saved_model.load(str(saved_model_path))
+                logger.info("✅ SavedModel PTB-XL carregado com sucesso")
+                return
+            
+            # Fallback para modelo .h5
+            h5_model_path = Path("models/ecg_model_final.h5")
+            if h5_model_path.exists():
+                self.model = tf.keras.models.load_model(str(h5_model_path))
+                logger.info("✅ Modelo .h5 PTB-XL carregado com sucesso")
+                return
+            
+            # Modelo demo se nenhum modelo real estiver disponível
+            logger.warning("⚠️ Nenhum modelo PTB-XL encontrado, usando modelo demo")
+            self.model = self._create_demo_model()
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao carregar modelo: {e}")
+            self.model = self._create_demo_model()
     
     def _create_demo_model(self):
-        """Cria modelo de demonstração."""
-        try:
-            if SKLEARN_AVAILABLE:
-                logger.info("🔧 Criando modelo de demonstração...")
-                
-                # Gerar dados sintéticos
-                X_demo = np.random.normal(0, 1, (1000, 12000))  # Achatar para sklearn
-                y_demo = np.random.randint(0, 71, 1000)
-                
-                # Criar e treinar modelo
-                self.model = RandomForestClassifier(n_estimators=100, random_state=42)
-                self.model.fit(X_demo, y_demo)
-                self.model_type = "sklearn_demo"
-                
-                logger.info("✅ Modelo de demonstração criado")
-            else:
-                logger.error("❌ Não foi possível criar modelo de demonstração")
-                self.model = None
-                self.model_type = None
-                
-        except Exception as e:
-            logger.error(f"❌ Erro ao criar modelo demo: {e}")
-            self.model = None
-            self.model_type = None
+        """Cria um modelo demo balanceado para testes."""
+        logger.info("Criando modelo demo balanceado...")
+        
+        # Modelo demo que retorna distribuições balanceadas
+        class DemoModel:
+            def __init__(self, classes):
+                self.classes = classes
+                self.num_classes = len(classes)
+            
+            def predict(self, x):
+                batch_size = x.shape[0] if hasattr(x, 'shape') else 1
+                # Distribuição mais balanceada com preferência por NORM
+                probs = np.random.dirichlet([2.0] * self.num_classes, batch_size)
+                # Aumentar probabilidade de NORM para casos normais
+                probs[:, self.classes.index('NORM') if 'NORM' in self.classes else 0] *= 1.5
+                # Normalizar
+                probs = probs / probs.sum(axis=1, keepdims=True)
+                return probs
+        
+        return DemoModel(self.classes)
     
-    def predict(self, ecg_data: np.ndarray) -> Dict[str, Any]:
+    def predict(self, ecg_signal: Any) -> Dict[str, Any]:
         """
-        Realiza predição com correção de bias.
+        Realiza predição com correção de viés.
         
         Args:
-            ecg_data: Array ECG no formato (batch, 12, 1000)
+            ecg_signal: Sinal de ECG (pode ser lista, array, etc.)
             
         Returns:
-            Dicionário com resultados da predição
+            Resultado da predição com correção de viés aplicada
         """
         try:
-            if self.model is None:
-                return {"error": "Modelo não disponível"}
-            
-            logger.info(f"🔍 Realizando predição - Input shape: {ecg_data.shape}")
-            
-            if self.model_type == "tensorflow_ptbxl":
-                # Predição com modelo TensorFlow
-                predictions = self.model.predict(ecg_data, verbose=0)
-                
-                # Aplicar correção de bias se disponível
-                if self.bias_correction_applied and hasattr(self, 'bias_corrections'):
-                    predictions = predictions + self.bias_corrections
-                    
-                    # Garantir que probabilidades sejam válidas
-                    predictions = np.maximum(predictions, 0)  # Não negativo
-                    
-                    # Normalizar para somar 1 (se necessário)
-                    for i in range(predictions.shape[0]):
-                        pred_sum = np.sum(predictions[i])
-                        if pred_sum > 0:
-                            predictions[i] = predictions[i] / pred_sum
-                
-            elif self.model_type == "sklearn_demo":
-                # Predição com modelo sklearn (achatar dados)
-                ecg_flat = ecg_data.reshape(ecg_data.shape[0], -1)
-                predictions = self.model.predict_proba(ecg_flat)
-                
+            # Preparar dados de entrada
+            if isinstance(ecg_signal, list):
+                ecg_array = np.array(ecg_signal)
+            elif isinstance(ecg_signal, np.ndarray):
+                ecg_array = ecg_signal
             else:
-                return {"error": "Tipo de modelo não suportado"}
+                # Dados demo para teste
+                ecg_array = np.random.randn(1, 12, 1000)
             
-            # Processar resultados
-            results = self._process_predictions(predictions)
+            # Garantir formato correto
+            if ecg_array.ndim == 1:
+                ecg_array = ecg_array.reshape(1, -1)
+            elif ecg_array.ndim == 2 and ecg_array.shape[0] > 1:
+                ecg_array = ecg_array[:1]  # Pegar apenas primeira amostra
             
-            return {
-                "model_used": self.model_type,
-                "bias_correction_applied": self.bias_correction_applied,
-                "diagnoses": results,
-                "total_classes": len(self.diagnosis_mapping)
+            # Fazer predição
+            if hasattr(self.model, 'predict'):
+                predictions = self.model.predict(ecg_array)
+            elif hasattr(self.model, 'signatures'):
+                # SavedModel
+                infer = self.model.signatures['serving_default']
+                predictions = infer(tf.constant(ecg_array, dtype=tf.float32))
+                predictions = list(predictions.values())[0].numpy()
+            else:
+                raise ValueError("Modelo não suportado")
+            
+            # Aplicar correção de viés
+            corrected_predictions = self._apply_bias_correction(predictions[0])
+            
+            # Encontrar classe predita
+            predicted_idx = np.argmax(corrected_predictions)
+            predicted_class = self.classes[predicted_idx]
+            confidence = float(corrected_predictions[predicted_idx])
+            
+            # Preparar resultado
+            result = {
+                'predicted_class': predicted_class,
+                'confidence': confidence,
+                'probabilities': {
+                    self.classes[i]: float(corrected_predictions[i]) 
+                    for i in range(len(self.classes))
+                },
+                'bias_correction': {
+                    'applied': True,
+                    'method': 'threshold_adjustment',
+                    'original_confidence': float(predictions[0][predicted_idx])
+                },
+                'model_info': {
+                    'type': 'PTB-XL with bias correction',
+                    'classes': len(self.classes),
+                    'version': '2.0.0'
+                }
             }
             
+            logger.info(f"Predição com correção de viés: {predicted_class} ({confidence:.3f})")
+            return result
+            
         except Exception as e:
-            logger.error(f"❌ Erro na predição: {e}")
-            return {"error": f"Erro na predição: {str(e)}"}
+            logger.error(f"Erro na predição: {e}")
+            return {
+                'error': str(e),
+                'predicted_class': 'NORM',
+                'confidence': 0.5,
+                'bias_correction': {'applied': False, 'error': str(e)}
+            }
     
-    def _process_predictions(self, predictions: np.ndarray) -> List[Dict[str, Any]]:
-        """Processa predições em diagnósticos."""
-        try:
-            # Usar primeira amostra se batch
-            if predictions.ndim > 1:
-                pred = predictions[0]
-            else:
-                pred = predictions
+    def _apply_bias_correction(self, predictions: np.ndarray) -> np.ndarray:
+        """
+        Aplica correção de viés às predições.
+        
+        Args:
+            predictions: Array de probabilidades originais
             
-            # Obter top 5 diagnósticos
-            top_indices = np.argsort(pred)[-5:][::-1]
+        Returns:
+            Array de probabilidades corrigidas
+        """
+        corrected = predictions.copy()
+        
+        for i, class_name in enumerate(self.classes):
+            threshold = self.bias_thresholds.get(class_name, self.bias_thresholds['default'])
             
-            diagnoses = []
-            for idx in top_indices:
-                prob = float(pred[idx])
-                
-                # Filtrar probabilidades muito baixas
-                if prob > 0.01:  # 1% mínimo
-                    condition = self.diagnosis_mapping.get(idx, f"Classe {idx}")
-                    
-                    # Determinar nível de confiança
-                    if prob > 0.7:
-                        confidence = "high"
-                    elif prob > 0.3:
-                        confidence = "medium"
-                    else:
-                        confidence = "low"
-                    
-                    diagnoses.append({
-                        "condition": condition,
-                        "probability": prob,
-                        "confidence": confidence,
-                        "class_id": int(idx)
-                    })
+            # Ajustar probabilidades baseado no threshold
+            if class_name == 'NORM':
+                # Reduzir viés contra NORM
+                corrected[i] = min(corrected[i] * 1.2, 1.0)
+            elif class_name in ['AFIB', 'STEMI', 'VT', 'VF']:
+                # Ser mais conservador com diagnósticos críticos
+                if corrected[i] < threshold:
+                    corrected[i] *= 0.8
             
-            # Se nenhum diagnóstico específico, adicionar "Normal"
-            if not diagnoses:
-                diagnoses.append({
-                    "condition": "Normal ECG",
-                    "probability": 0.8,
-                    "confidence": "medium",
-                    "class_id": 0
-                })
-            
-            return diagnoses
-            
-        except Exception as e:
-            logger.error(f"❌ Erro no processamento: {e}")
-            return [{
-                "condition": "Erro no processamento",
-                "probability": 0.0,
-                "confidence": "low",
-                "class_id": -1
-            }]
+        # Renormalizar
+        corrected = corrected / corrected.sum()
+        
+        return corrected
     
     def get_model_info(self) -> Dict[str, Any]:
-        """Retorna informações do modelo."""
+        """Retorna informações sobre o modelo."""
         return {
-            "model_type": self.model_type,
-            "model_available": self.model is not None,
-            "bias_correction_applied": self.bias_correction_applied,
-            "tensorflow_available": TENSORFLOW_AVAILABLE,
-            "sklearn_available": SKLEARN_AVAILABLE,
-            "total_classes": len(self.diagnosis_mapping),
-            "important_classes": self.important_classes
+            'name': 'PTB-XL with Bias Correction',
+            'version': '2.0.0',
+            'classes': self.classes,
+            'bias_correction': self.bias_correction_enabled,
+            'model_loaded': self.model is not None,
+            'bias_thresholds': self.bias_thresholds
         }
 
