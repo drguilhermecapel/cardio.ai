@@ -18,6 +18,8 @@ import uuid
 
 # Importação do novo roteador para ECG Image Processing
 from app.api.v1 import ecg_image_endpoints
+# Importação do roteador de diagnósticos do sistema
+from app.api.v1 import system_diagnostics
 
 # Configurar logging
 logging.basicConfig(
@@ -103,8 +105,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registrar o roteador para o novo endpoint de imagem ECG
+# Registrar o roteador para ECG Image Processing
 app.include_router(ecg_image_endpoints.router, prefix="/api/v1/ecg-image", tags=["ECG Image Processing"])
+
+# Registrar o roteador de diagnósticos do sistema
+app.include_router(system_diagnostics.router, prefix="/api/v1/system", tags=["System Diagnostics"])
 
 # Servir arquivos estáticos
 if os.path.exists("static"):

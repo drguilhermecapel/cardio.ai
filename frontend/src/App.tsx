@@ -25,6 +25,7 @@ import {
   Activity,
   Pill,
   ScanLine,
+  TestTube2,
   Sparkles,
   Heart,
   Zap,
@@ -37,6 +38,7 @@ import MedicalCard from './components/ui/MedicalCard'
 import ECGVisualization from './components/ui/ECGVisualization'
 import AIInsightPanel from './components/ui/AIInsightPanel'
 import ECGImageAnalysisPage from './pages/ECGImageAnalysisPage'
+import ECGTestSuitePage from './pages/ECGTestSuitePage'
 
 const CardioApp = (): JSX.Element => {
   const [activeModule, setActiveModule] = useState('dashboard')
@@ -80,6 +82,12 @@ const CardioApp = (): JSX.Element => {
       name: 'Análise de Imagem',
       icon: ScanLine,
       color: 'from-teal-500 to-blue-500',
+    },
+    {
+      id: 'test-suite',
+      name: 'Suite de Testes',
+      icon: TestTube2,
+      color: 'from-emerald-500 to-cyan-500',
     },
     {
       id: 'telemedicine',
@@ -716,6 +724,8 @@ const CardioApp = (): JSX.Element => {
         return <DashboardModule />
       case 'ecg-image-analysis':
         return <ECGImageAnalysisPage />
+      case 'test-suite':
+        return <ECGTestSuitePage />
       default:
         return (
           <div className="flex items-center justify-center h-[calc(100vh-200px)]">
